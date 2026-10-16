@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#102a43">
+  <title>NTN终端 PC配置台</title>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+  <header class="hero">
+    <div>
+      <p class="eyebrow">IRIDIUM NTN · WEB SERIAL</p>
+      <h1>NTN终端 PC配置台</h1>
+      <p class="subtitle">通过USB转RS232完成配置、状态检查、模式1维护和原始数据联调。</p>
+    </div>
+    <div class="hero-status">
+      <span id="supportBadge" class="badge badge-warn">检测浏览器…</span>
+      <span id="connectionBadge" class="badge">串口未连接</span>
+      <span id="maintenanceBadge" class="badge">RAW/普通模式</span>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="panel connection-panel">
+      <div class="panel-title">
+        <div><span class="step">01</span><h2>串口连接</h2></div>
+        <span id="portInfo" class="muted">等待用户授权串口</span>
+      </div>
+      <div class="toolbar">
+        <label>波特率
+          <select id="baudSelect">
+            <option>9600</option><option>19200</option><option>38400</option>
+            <option>57600</option><option selected>115200</option>
+          </select>
+        </label>
+        <button id="connectButton" class="primary">选择并连接串口</button>
+        <button id="disconnectButton" disabled>断开</button>
+        <button id="refreshPortsButton" class="ghost">查看已授权端口</button>
+      </div>
+      <p class="hint">请使用Chrome或Edge桌面版，并从本工程的本地服务打开页面。串口参数固定为8N1、无流控。</p>
+    </section>
+
+    <section class="panel">
+      <div class="panel-title"><div><span class="step">02</span><h2>状态与快捷查询</h2></div></div>
+      <div class="quick-grid">
+        <button data-at="AT+MCUVER?">固件版本</button>
+        <button data-at="AT+MCUCAP?">能力列表</button>
+        <button data-at="AT+MCUSTAT?">运行状态</button>
+        <button data-at="AT+MCUCFG?">全部配置</button>
+        <button data-at="AT+MCUQUEUE?">缓存队列</button>
+        <button data-at="AT+MCUGNSS?">GNSS</button>
+        <button data-at="AT+MCUTIME?">UTC时间</button>
+        <button data-at="AT+MCURXMODE?">接收模式</button>
+      </div>
+      <div class="telemetry-grid">
+        <article><span>工作模式</span><strong id="modeValue">—</strong></article>
+        <article><span>NTN状态</span><strong id="ntnValue">—</strong></article>
+        <article><span>Socket</span><strong id="socketValue">—</strong></article>
+        <article><span>Flash待发</span><strong id="flashValue">—</strong></article>
+        <article><span>GNSS</span><strong id="gnssValue">—</strong></article>
+        <article><span>最近错误</span><strong id="errorValue">—</strong></article>
+      </div>
+    </section>
+
+    <section class="panel span-2">
+      <div class="panel-title"><div><span class="step">03</span><h2>常用配置</h2></div><span class="muted">以设备返回OK为成功依据</span></div>
+      <div class="config-grid">
+        <form id="modeForm" class="config-card">
+          <h3>工作模式</h3>
+          <label>模式<select name="mode"><option value="0">模式0 · AT透传</option><option value="1">模式1 · RAW上行</option></select></label>
+          <button type="submit">写入 MCUMODE</button>
+        </form>
+        <form id="hostForm" class="config-card">
+          <h3>服务器</h3>
+          <label>域名或IPv4<input name="host" required placeholder="example.com"></label>
+          <div class="two-cols"><label>远端端口<input name="remote" type="number" min="1" max="65535" required></label><label>本地端口<input name="local" type="number" min="0" max="65535" value="0"></label></div>
+          <button type="submit">写入主机和端口</button>
+        </form>
+        <form id="networkForm" class="config-card">
+          <h3>网络参数</h3>
+          <label>APN<input name="apn" placeholder="由运营网络提供"></label>
+          <label>接收模式<select name="rxMode"><option value="0">0 · QUERY</option><option value="1">1 · URC PUSH</option></select></label>
+          <button type="submit">写入APN和接收模式</button>
+        </form>
+        <form id="dnsForm" class="config-card">
+          <h3>DNS</h3>
+          <label>模式<select name="dnsMode"><option value="0">0 · 关闭</option><option value="1" selected>1 · 自动/备用</option><option value="2">2 · 强制配置</option></select></label>
+          <div class="two-cols"><label>主DNS<input name="primary" placeholder="8.8.8.8"></label><label>备DNS<input name="secondary" placeholder="1.1.1.1"></label></div>
+          <button type="submit">写入 DNS</button>
+        </form>
+        <form id="identityForm" class="config-card">
+          <h3>设备身份与上报</h3>
+          <label>设备SN<input name="sn" required placeholder="设备序列号"></label>
+          <div class="two-cols"><label>资产上报<select name="enabled"><option value="0">关闭</option><option value="1">开启</option></select></label><label>周期/秒<input name="period" type="number" min="1" value="3600"></label></div>
+          <button type="submit">写入身份和上报</button>
+        </form>
+        <form id="rawForm" class="config-card">
+          <h3>RAW分块</h3>
+          <div class="three-cols"><label>间隔/ms<input name="gap" type="number" min="1" value="50"></label><label>块长<input name="block" type="number" min="1" value="256"></label><label>等待/ms<input name="wait" type="number" min="1" value="1000"></label></div>
+          <button type="submit">写入 RAWPACK</button>
+        </form>
+      </div>
+    </section>
+
+    <section class="panel warning-panel">
+      <div class="panel-title"><div><span class="step">04</span><h2>模式1维护</h2></div></div>
+      <p>网页会等待至少1.1秒串口静默，一次写入<code>+++</code>，再等待1.1秒并发送<code>AT+MCUCFG=1</code>。连续传感器流无法形成静默时请改用Android蓝牙配置。</p>
+      <div class="toolbar">
+        <button id="enterMaintenanceButton" class="warn">执行 +++ 维护宏</button>
+        <button id="exitMaintenanceButton">退出维护</button>
+      </div>
+      <div class="baud-change">
+        <label>修改RS232波特率<select id="newBaudSelect"><option>9600</option><option>19200</option><option>38400</option><option>57600</option><option selected>115200</option></select></label>
+        <button id="changeBaudButton">改速并自动重开</button>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="panel-title"><div><span class="step">05</span><h2>串口终端</h2></div></div>
+      <label>AT/文本命令<textarea id="textInput" rows="3" placeholder="AT+MCUSTAT?"></textarea></label>
+      <div class="toolbar">
+        <label>行尾<select id="lineEnding"><option value="crlf">CRLF</option><option value="cr">CR</option><option value="lf">LF</option><option value="none">无</option></select></label>
+        <button id="sendTextButton" class="primary">发送文本</button>
+      </div>
+      <label>原始HEX<textarea id="hexInput" rows="3" placeholder="00 FF 0D 0A"></textarea></label>
+      <button id="sendHexButton">发送HEX</button>
+    </section>
+
+    <section class="panel span-2 log-panel">
+      <div class="panel-title">
+        <div><span class="step">06</span><h2>实时记录</h2></div>
+        <div class="toolbar compact"><button id="clearLogButton" class="ghost">清空</button><button id="exportLogButton">导出日志</button></div>
+      </div>
+      <pre id="serialLog" aria-live="polite">等待串口连接…\n</pre>
+    </section>
+  </main>
+
+  <footer>NTN终端 PC Web Serial · P0演示版 · 浏览器表单值不代表设备已保存</footer>
+  <script type="module" src="./src/app.js"></script>
+</body>
+</html>
