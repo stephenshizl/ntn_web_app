@@ -10,7 +10,7 @@ export class SerialClient extends EventTarget {
     this.lastActivityAt = 0;
   }
 
-  static isSupported() { return "serial" in navigator; }
+  static isSupported() { return typeof navigator !== "undefined" && "serial" in navigator; }
 
   async chooseAndConnect(baudRate) {
     if (!SerialClient.isSupported()) throw new Error("当前浏览器不支持Web Serial");

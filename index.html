@@ -15,6 +15,7 @@
       <p class="subtitle">通过USB转RS232完成配置、状态检查、模式1维护和原始数据联调。</p>
     </div>
     <div class="hero-status">
+      <label class="language-select">Language<select id="languageSelect" aria-label="Language"><option value="zh">中文</option><option value="en">English</option></select></label>
       <span id="supportBadge" class="badge badge-warn">检测浏览器…</span>
       <span id="connectionBadge" class="badge">串口未连接</span>
       <span id="maintenanceBadge" class="badge">RAW/普通模式</span>
@@ -38,6 +39,7 @@
         <button id="disconnectButton" disabled>断开</button>
         <button id="refreshPortsButton" class="ghost">查看已授权端口</button>
       </div>
+      <p id="connectionMessage" class="connection-message info" role="status" aria-live="polite">正在检查浏览器串口能力…</p>
       <p class="hint">请使用Chrome或Edge桌面版，并从本工程的本地服务打开页面。串口参数固定为8N1、无流控。</p>
     </section>
 

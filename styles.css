@@ -19,6 +19,8 @@ body { margin: 0; color: var(--ink); background: linear-gradient(180deg, #e8f1f2
 h1 { margin: 0; font-size: clamp(30px, 5vw, 52px); letter-spacing: -.04em; }
 .subtitle { max-width: 700px; margin: 14px 0 0; color: #d9eff0; }
 .hero-status { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; max-width: 360px; }
+.language-select { display: flex; align-items: center; gap: 6px; color: #d9eff0; font-size: 12px; }
+.language-select select { width: auto; min-width: 88px; padding: 7px 9px; color: var(--ink); }
 .badge { padding: 9px 12px; border: 1px solid rgba(255,255,255,.25); border-radius: 999px; background: rgba(255,255,255,.1); font-size: 13px; font-weight: 700; }
 .badge-ok { background: #147d64; }.badge-warn { background: #a8610a; }.badge-error { background: #a61b1b; }
 .layout { width: min(1320px, calc(100% - 32px)); margin: -34px auto 42px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; position: relative; }
@@ -43,6 +45,10 @@ button.primary:hover { background: var(--brand-dark); }
 button.warn { color: white; border-color: var(--accent); background: var(--accent); }
 button.ghost { background: transparent; }
 .hint, .muted { color: var(--muted); font-size: 12px; }.hint { margin: 12px 0 0; }
+.connection-message { margin: 12px 0 0; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; font-size: 13px; line-height: 1.5; }
+.connection-message.info { color: #28536b; background: #edf7fb; border-color: #b9dfed; }
+.connection-message.ok { color: #176548; background: #eaf8f0; border-color: #b8e2cc; }
+.connection-message.error { color: #8d281d; background: #fff0ee; border-color: #efbdb6; }
 .quick-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 9px; }
 .telemetry-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; margin-top: 16px; }
 .telemetry-grid article { padding: 12px; border-radius: 12px; background: #f0f7f7; border: 1px solid #d5ebeb; }

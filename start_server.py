@@ -11,6 +11,15 @@ import webbrowser
 
 
 class NoCacheHandler(http.server.SimpleHTTPRequestHandler):
+    # Windows may register .js as text/plain.  With nosniff enabled, Chromium
+    # then refuses to execute the ES module and no page controls are bound.
+    extensions_map = {
+        **http.server.SimpleHTTPRequestHandler.extensions_map,
+        ".js": "text/javascript",
+        ".mjs": "text/javascript",
+        ".css": "text/css",
+    }
+
     def end_headers(self) -> None:
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")

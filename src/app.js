@@ -1,4 +1,5 @@
 import { SerialClient } from "./serial-client.js";
+import { initI18n, t } from "./i18n.js";
 import {
   buildAtBytes, buildTextBytes, bytesToEscapedText, bytesToHex,
   extractJsonResponse, lineEndingValue, parseHex, safeCommandValue
@@ -13,10 +14,47 @@ let responseWindow = "";
 let pendingMaintenance = null;
 let pendingBaud = null;
 let baudSwitching = false;
+let transientMessageTimer = null;
 
 function setBadge(element, text, kind = "") {
   element.textContent = text;
   element.className = `badge ${kind ? `badge-${kind}` : ""}`.trim();
+}
+
+function setConnectionMessage(message, kind = "info") {
+  const target = byId("connectionMessage");
+  target.textContent = message;
+  target.className = `connection-message ${kind}`;
+}
+
+function restoreConnectedMessage() {
+  if (!client.connected) return;
+  setConnectionMessage(t(`串口已连接，当前参数：${client.baudRate}、8N1、无流控。`), "ok");
+}
+
+function showTransientActionError(error) {
+  const message = String(error?.message ?? error ?? "未知错误");
+  setConnectionMessage(`操作未执行：${message}`, "error");
+  if (transientMessageTimer) clearTimeout(transientMessageTimer);
+  transientMessageTimer = setTimeout(() => {
+    transientMessageTimer = null;
+    restoreConnectedMessage();
+  }, 4000);
+}
+
+function serialErrorMessage(error) {
+  const name = error?.name ?? "";
+  const message = String(error?.message ?? error ?? "未知错误");
+  if (name === "NotFoundError") {
+    return "未选择串口，或浏览器没有发现可选端口。请确认 USB 转 RS232 已在设备管理器中显示为 COM 口。";
+  }
+  if (name === "SecurityError") {
+    return "浏览器阻止了串口权限。请用 Chrome/Edge 桌面版，并通过 http://127.0.0.1:18787 打开本页面。";
+  }
+  if (name === "NetworkError" || /open serial port|无法打开/i.test(message)) {
+    return "串口无法打开，通常是被 VS Code 串口监视器、串口助手等程序占用。请关闭占用程序后重试。";
+  }
+  return `串口操作失败：${message}`;
 }
 
 function appendLog(direction, bytes, note = "") {
@@ -92,11 +130,13 @@ async function sendAt(command) {
   await sendBytes(buildAtBytes(command), "AT");
 }
 
-async function runAction(action) {
+async function runAction(action, options = {}) {
   try {
     await action();
   } catch (error) {
     appendSystem(`错误：${error.message ?? error}`);
+    if (options.connection) setConnectionMessage(serialErrorMessage(error), "error");
+    else showTransientActionError(error);
   }
 }
 
@@ -104,7 +144,10 @@ client.addEventListener("rx", event => {
   appendLog("RX", event.detail);
   consumeText(event.detail);
 });
-client.addEventListener("error", event => appendSystem(`串口异常：${event.detail.message ?? event.detail}`));
+client.addEventListener("error", event => {
+  appendSystem(`串口异常：${event.detail.message ?? event.detail}`);
+  setConnectionMessage(serialErrorMessage(event.detail), "error");
+});
 client.addEventListener("state", event => {
   const state = event.detail;
   setControls(Boolean(state.connected));
@@ -116,9 +159,13 @@ client.addEventListener("state", event => {
     setBadge(byId("connectionBadge"), `${state.baudRate} · 已连接`, "ok");
     byId("portInfo").textContent = identity;
     appendSystem(`串口已连接：${state.baudRate} 8N1`);
+    setConnectionMessage(`已连接 ${identity}，当前串口参数：${state.baudRate}、8N1、无流控。`, "ok");
   } else {
     setBadge(byId("connectionBadge"), "串口未连接");
-    if (state.unexpected) appendSystem("串口意外断开，请检查拔插状态");
+    if (state.unexpected) {
+      appendSystem("串口意外断开，请检查拔插状态");
+      setConnectionMessage("串口意外断开，请检查 USB 连接和 USB 转 RS232 设备。", "error");
+    }
   }
 });
 
@@ -164,8 +211,16 @@ function bindForm(id, builder) {
 }
 
 function init() {
-  if (SerialClient.isSupported()) setBadge(byId("supportBadge"), "Web Serial可用", "ok");
-  else setBadge(byId("supportBadge"), "浏览器不支持Web Serial", "error");
+  initI18n();
+  const supported = SerialClient.isSupported();
+  if (supported) {
+    setBadge(byId("supportBadge"), "Web Serial可用", "ok");
+    setConnectionMessage("点击“选择并连接串口”。若列表为空，请检查 USB 转 RS232 驱动、COM 口和端口占用。", "info");
+  } else {
+    setBadge(byId("supportBadge"), "浏览器不支持Web Serial", "error");
+    setConnectionMessage("当前浏览器不支持 Web Serial。请使用 Chrome 或 Edge 桌面版，并从本地服务地址打开页面。", "error");
+    byId("connectButton").disabled = true;
+  }
   const savedBaud = localStorage.getItem("ntn.pc.baud");
   if (savedBaud && [...byId("baudSelect").options].some(option => option.value === savedBaud)) {
     byId("baudSelect").value = savedBaud;
@@ -174,15 +229,19 @@ function init() {
 
   byId("connectButton").addEventListener("click", () => runAction(async () => {
     const baud = Number(byId("baudSelect").value);
+    setConnectionMessage("正在请求浏览器串口权限，请在弹出的端口列表中选择 USB 转 RS232 对应的 COM 口。", "info");
     await client.chooseAndConnect(baud);
     localStorage.setItem("ntn.pc.baud", String(baud));
-  }));
+  }, { connection: true }));
   byId("disconnectButton").addEventListener("click", () => runAction(() => client.disconnect()));
   byId("refreshPortsButton").addEventListener("click", () => runAction(async () => {
     if (!SerialClient.isSupported()) throw new Error("浏览器不支持Web Serial");
     const ports = await navigator.serial.getPorts();
     appendSystem(`浏览器已授权串口数量：${ports.length}`);
-  }));
+    setConnectionMessage(ports.length
+      ? `浏览器已授权 ${ports.length} 个串口；点击“选择并连接串口”可重新选择。`
+      : "尚未授权串口。点击“选择并连接串口”后，在浏览器弹窗选择 USB 转 RS232 对应的 COM 口。", "info");
+  }, { connection: true }));
   document.querySelectorAll("[data-at]").forEach(button => {
     button.addEventListener("click", () => runAction(() => sendAt(button.dataset.at)));
   });
