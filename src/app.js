@@ -17,13 +17,13 @@ let baudSwitching = false;
 let transientMessageTimer = null;
 
 function setBadge(element, text, kind = "") {
-  element.textContent = text;
+  element.textContent = t(text);
   element.className = `badge ${kind ? `badge-${kind}` : ""}`.trim();
 }
 
 function setConnectionMessage(message, kind = "info") {
   const target = byId("connectionMessage");
-  target.textContent = message;
+  target.textContent = t(message);
   target.className = `connection-message ${kind}`;
 }
 
@@ -76,7 +76,7 @@ function appendLog(direction, bytes, note = "") {
 }
 
 function appendSystem(message) {
-  appendLog("SYSTEM", new TextEncoder().encode(message));
+  appendLog("SYSTEM", new TextEncoder().encode(t(message)));
 }
 
 function setControls(connected) {

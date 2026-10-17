@@ -20,6 +20,15 @@ const zhToEn = {
   "串口终端": "Serial terminal", "AT/文本命令": "AT / text command", "行尾": "Line ending", "无": "None", "发送文本": "Send text", "原始HEX": "Raw HEX", "发送HEX": "Send HEX",
   "实时记录": "Live log", "清空": "Clear", "导出日志": "Export log", "等待串口连接…": "Waiting for serial connection…",
   "NTN终端 PC Web Serial · P0演示版 · 浏览器表单值不代表设备已保存": "NTN Terminal PC Web Serial · P0 demo · Browser form values are not device-saved values."
+  ,"Web Serial可用": "Web Serial available", "浏览器不支持Web Serial": "Web Serial is not supported", "维护模式": "Maintenance mode",
+  "点击“选择并连接串口”。若列表为空，请检查 USB 转 RS232 驱动、COM 口和端口占用。": "Select and connect a serial port. If the list is empty, check the USB-to-RS232 driver, COM port, and port ownership.",
+  "当前浏览器不支持 Web Serial。请使用 Chrome 或 Edge 桌面版，并从本地服务地址打开页面。": "This browser does not support Web Serial. Use desktop Chrome or Edge and open the local service address.",
+  "正在请求浏览器串口权限，请在弹出的端口列表中选择 USB 转 RS232 对应的 COM 口。": "Requesting browser serial permission. Select the COM port for the USB-to-RS232 adapter in the dialog.",
+  "尚未授权串口。点击“选择并连接串口”后，在浏览器弹窗选择 USB 转 RS232 对应的 COM 口。": "No serial port is authorized yet. Select the USB-to-RS232 COM port in the browser dialog after clicking Select and connect.",
+  "串口意外断开，请检查 USB 连接和 USB 转 RS232 设备。": "The serial port disconnected unexpectedly. Check the USB connection and USB-to-RS232 adapter.",
+  "未选择串口，或浏览器没有发现可选端口。请确认 USB 转 RS232 已在设备管理器中显示为 COM 口。": "No serial port was selected, or the browser found no available port. Confirm that the USB-to-RS232 adapter appears as a COM port in Device Manager.",
+  "浏览器阻止了串口权限。请用 Chrome/Edge 桌面版，并通过 http://127.0.0.1:18787 打开本页面。": "The browser blocked serial permission. Use desktop Chrome or Edge and open this page through http://127.0.0.1:18787.",
+  "串口无法打开，通常是被 VS Code 串口监视器、串口助手等程序占用。请关闭占用程序后重试。": "The serial port cannot be opened. It is usually in use by VS Code Serial Monitor, a terminal program, or another tool. Close it and retry."
 };
 
 const storageKey = "ntn.pc.language";
@@ -56,5 +65,22 @@ export function initI18n() {
 }
 
 export function t(zh) {
-  return language === "en" ? (zhToEn[zh] ?? zh) : zh;
+  if (language !== "en") return zh;
+  if (zhToEn[zh]) return zhToEn[zh];
+  if (/^串口已连接，当前参数：(.+)、8N1、无流控。$/.test(zh)) {
+    return zh.replace(/^串口已连接，当前参数：(.+)、8N1、无流控。$/, "Serial connected. Current settings: $1, 8N1, no flow control.");
+  }
+  if (/^已连接 (.+)，当前串口参数：(.+)、8N1、无流控。$/.test(zh)) {
+    return zh.replace(/^已连接 (.+)，当前串口参数：(.+)、8N1、无流控。$/, "Connected to $1. Current serial settings: $2, 8N1, no flow control.");
+  }
+  if (/^浏览器已授权串口数量：(\d+)$/.test(zh)) {
+    return zh.replace(/^浏览器已授权串口数量：(\d+)$/, "Authorized browser serial ports: $1");
+  }
+  if (/^浏览器已授权 (\d+) 个串口；点击“选择并连接串口”可重新选择。$/.test(zh)) {
+    return zh.replace(/^浏览器已授权 (\d+) 个串口；点击“选择并连接串口”可重新选择。$/, "$1 serial port(s) authorized. Select and connect to choose again.");
+  }
+  if (/^操作未执行：(.*)$/.test(zh)) return zh.replace(/^操作未执行：(.*)$/, "Operation was not performed: $1");
+  if (/^串口操作失败：(.*)$/.test(zh)) return zh.replace(/^串口操作失败：(.*)$/, "Serial operation failed: $1");
+  if (/^错误：(.*)$/.test(zh)) return zh.replace(/^错误：(.*)$/, "Error: $1");
+  return zh;
 }
