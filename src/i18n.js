@@ -1,4 +1,24 @@
 const zhToEn = {
+  "名称请求失败，请检查固件支持和连接状态": "Name request failed: check firmware support and connection",
+  "蓝牙名称": "Bluetooth name",
+  "连接后查询名称": "Connect and query the name",
+  "手动名称": "Manual name",
+  "保存手动名称": "Save manual name",
+  "查询名称": "Query name",
+  "查询身份": "Query identity",
+  "恢复自动命名": "Restore AUTO",
+  "刷新身份": "Refresh identity",
+  "蓝牙名称格式无效": "Invalid Bluetooth name",
+  "名称限1–31位字母、数字、下划线或连字符。以APPLIED和实际名称为生效依据；DEFERRED表示已保存，断开蓝牙后生效。手动名称可能重名，请按MAC识别。": "Use 1\u201331 ASCII letters, digits, underscore or hyphen. APPLIED confirms the actual name; DEFERRED applies after Bluetooth disconnects. Manual names may duplicate: identify devices by MAC.",
+
+  "串口已断开，可重新连接已授权串口。": "Serial disconnected. You can reconnect the authorized port.",
+  "连接已授权串口": "Connect authorized port",
+  "请使用选择并连接串口，明确选择目标端口": "Use Select and connect to choose the target port explicitly",
+  "维护入口状态": "Maintenance entry status",
+  "维护状态未知": "Maintenance state unknown",
+  "已有维护操作进行中": "A maintenance operation is already in progress",
+  "维护操作未收到确认，请查询维护入口状态后重试": "Maintenance was not confirmed. Query the maintenance entry status before retrying.",
+  "改速未收到确认，请核对设备实际波特率后重试": "The speed change was not confirmed. Check the device baud rate before retrying.",
   "NTN终端 PC配置台": "NTN Terminal PC Console",
   "通过USB转RS232完成配置、状态检查、模式1维护和原始数据联调。": "Configure and inspect the terminal through USB-to-RS232, maintain Mode 1, and test raw data.",
   "检测浏览器…": "Checking browser…", "串口未连接": "Serial disconnected", "RAW/普通模式": "RAW / normal mode",
@@ -34,12 +54,35 @@ const zhToEn = {
 const storageKey = "ntn.pc.language";
 let language = "zh";
 
-function replaceText(node) {
-  const value = node.nodeValue;
-  const trimmed = value.trim();
-  const translated = zhToEn[trimmed];
-  if (!translated) return;
-  node.nodeValue = value.replace(trimmed, translated);
+const enToZh = Object.fromEntries(Object.entries(zhToEn).map(([zh, en]) => [en, zh]));
+
+function toChinese(value) {
+  if (enToZh[value]) return enToZh[value];
+  return value
+    .replace(/^(\d+) · Connected$/, "$1 · 已连接")
+    .replace(/^Serial connected\. Current settings: (.+), 8N1, no flow control\.$/, "串口已连接，当前参数：$1、8N1、无流控。")
+    .replace(/^Connected to (.+)\. Current serial settings: (.+), 8N1, no flow control\.$/, "已连接 $1，当前串口参数：$2、8N1、无流控。")
+    .replace(/^Operation was not performed: (.*)$/, "操作未执行：$1");
+}
+
+function applyLanguage() {
+  document.documentElement.lang = language === "en" ? "en" : "zh-CN";
+  const title = toChinese(document.title);
+  document.title = language === "en" ? t(title) : title;
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  const nodes = [];
+  while (walker.nextNode()) nodes.push(walker.currentNode);
+  for (const node of nodes) {
+    if (node.parentElement?.closest("#serialLog, textarea, script, style")) continue;
+    const value = node.nodeValue;
+    const trimmed = value.trim();
+    const zh = toChinese(trimmed);
+    node.nodeValue = value.replace(trimmed, language === "en" ? t(zh) : zh);
+  }
+  document.querySelectorAll("[placeholder]").forEach(element => {
+    const zh = toChinese(element.placeholder);
+    element.placeholder = language === "en" ? t(zh) : zh;
+  });
 }
 
 export function initI18n() {
@@ -48,25 +91,17 @@ export function initI18n() {
   const selector = document.getElementById("languageSelect");
   selector.value = language;
   selector.addEventListener("change", () => {
-    localStorage.setItem(storageKey, selector.value);
-    window.location.reload();
+    language = selector.value === "en" ? "en" : "zh";
+    localStorage.setItem(storageKey, language);
+    applyLanguage();
   });
-  if (language !== "en") return;
-  document.documentElement.lang = "en";
-  document.title = zhToEn[document.title] ?? document.title;
-  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-  const nodes = [];
-  while (walker.nextNode()) nodes.push(walker.currentNode);
-  nodes.forEach(replaceText);
-  document.querySelectorAll("[placeholder]").forEach(element => {
-    const translated = zhToEn[element.placeholder];
-    if (translated) element.placeholder = translated;
-  });
+  applyLanguage();
 }
 
 export function t(zh) {
   if (language !== "en") return zh;
   if (zhToEn[zh]) return zhToEn[zh];
+  if (/^\d+ · 已连接$/.test(zh)) return zh.replace("已连接", "Connected");
   if (/^串口已连接，当前参数：(.+)、8N1、无流控。$/.test(zh)) {
     return zh.replace(/^串口已连接，当前参数：(.+)、8N1、无流控。$/, "Serial connected. Current settings: $1, 8N1, no flow control.");
   }

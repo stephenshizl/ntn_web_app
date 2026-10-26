@@ -18,6 +18,13 @@ export class SerialClient extends EventTarget {
     await this.open(port, baudRate);
   }
 
+  async connectAuthorized(baudRate) {
+    if (!SerialClient.isSupported()) throw new Error("当前浏览器不支持Web Serial");
+    const ports = await navigator.serial.getPorts();
+    if (ports.length !== 1) throw new Error("请使用选择并连接串口，明确选择目标端口");
+    await this.open(ports[0], baudRate);
+  }
+
   async open(port, baudRate) {
     if (this.connected) await this.disconnect(false);
     this.port = port;

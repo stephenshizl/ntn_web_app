@@ -13,8 +13,14 @@ let textStream = "";
 let responseWindow = "";
 let pendingMaintenance = null;
 let pendingBaud = null;
+let pendingBaudTimer = null;
+let pendingMaintenanceTimer = null;
+let maintenanceConfirmed = false;
 let baudSwitching = false;
 let transientMessageTimer = null;
+let btNamePoll=null;
+let lastRequestIsName=false;
+let btNamePollUntil=0;
 
 function setBadge(element, text, kind = "") {
   element.textContent = t(text);
@@ -80,10 +86,35 @@ function appendSystem(message) {
 }
 
 function setControls(connected) {
-  byId("connectButton").disabled = connected;
+  byId("connectButton").disabled = connected || !SerialClient.isSupported();
   byId("disconnectButton").disabled = !connected;
+  byId("connectAuthorizedButton").disabled = connected || !SerialClient.isSupported();
   document.querySelectorAll("[data-at], form button, #sendTextButton, #sendHexButton, #enterMaintenanceButton, #exitMaintenanceButton, #changeBaudButton")
     .forEach(button => { button.disabled = !connected; });
+}
+
+function clearPendingBaud() {
+  if (pendingBaudTimer !== null) clearTimeout(pendingBaudTimer);
+  pendingBaudTimer = null;
+  pendingBaud = null;
+}
+
+function clearPendingMaintenance() {
+  if (pendingMaintenanceTimer !== null) clearTimeout(pendingMaintenanceTimer);
+  pendingMaintenanceTimer = null;
+  pendingMaintenance = null;
+  maintenanceConfirmed = false;
+}
+
+function beginMaintenance(action) {
+  if (pendingMaintenance) throw new Error("已有维护操作进行中");
+  pendingMaintenance = action;
+  maintenanceConfirmed = false;
+  pendingMaintenanceTimer = setTimeout(() => {
+    clearPendingMaintenance();
+    setBadge(byId("maintenanceBadge"), "维护状态未知", "warn");
+    appendSystem("维护操作未收到确认，请查询维护入口状态后重试");
+  }, 8000);
 }
 
 function updateStatusFromResponse() {
@@ -97,18 +128,66 @@ function updateStatusFromResponse() {
   byId("errorValue").textContent = status.last_error ?? "0";
 }
 
+function stopBtNamePoll() {
+  if (btNamePoll) clearInterval(btNamePoll);
+  btNamePoll=null;
+}
+function startBtNamePoll() {
+  stopBtNamePoll();btNamePollUntil=Date.now()+20000;
+  btNamePoll=setInterval(() => {
+    if (!client.connected || Date.now()>btNamePollUntil) {stopBtNamePoll();return;}
+    void runAction(() => sendAt("AT+MCUBTNAME?"));
+  },2500);
+}
 function processLine(rawLine) {
   const line = rawLine.trim();
   if (!line) return;
-  if (line.includes("+MCUPENDING") && pendingBaud && !baudSwitching) {
+  if (line.includes("[BOOT] NTN-Terminal started")) {
+    clearPendingBaud();
+    clearPendingMaintenance();
+    setBadge(byId("maintenanceBadge"), "维护状态未知");
+  }
+  const btName=extractJsonResponse(line,"+MCUBTNAME");
+  if (btName) {
+    byId("btNameState").textContent=`${btName.mode} · ${btName.source} · ${btName.state}`;
+    byId("btNameActual").textContent=`Desired: ${btName.desired}\nApplied: ${btName.applied}\nMAC: ${btName.mac} · Error: ${btName.last_error}`;
+    if (btName.state==="APPLIED" || btName.state==="SAVE_FAILED" || btName.state==="INVALID_NAME") stopBtNamePoll();
+  }
+  const identity=extractJsonResponse(line,"+MCUBTIDENT");
+  if (identity) byId("btNameIdentity").textContent=`Terminal SN: ${identity.terminal_sn}\nModem SN: ${identity.modem_sn}\nIMEI: ${identity.imei}`;
+  const pending = extractJsonResponse(line, "+MCUPENDING");
+  const applied = extractJsonResponse(line, "+MCUAPPLY");
+  if (pending?.action === "RS232_BAUD" && pending.baud === pendingBaud && !baudSwitching) {
     void performBaudSwitch(pendingBaud);
   }
-  if (line === "OK" && pendingMaintenance) {
+  if (pendingBaud !== null && !baudSwitching && applied?.state === "APPLIED" && applied.baud === pendingBaud) {
+    clearPendingBaud();
+  }
+  const mode = extractJsonResponse(line, "+MCUMODE");
+  if (applied?.mode === 0 || mode?.effective === 0) {
+    clearPendingMaintenance();
+    setBadge(byId("maintenanceBadge"), "RAW/普通模式");
+  }
+  if (pendingMaintenance && typeof applied?.pc_config === "boolean") {
+    maintenanceConfirmed = applied.pc_config === (pendingMaintenance === "enter");
+  }
+  const maintenance = extractJsonResponse(line, "+MCUCFG");
+  if (typeof maintenance?.active === "boolean") {
+    setBadge(byId("maintenanceBadge"), maintenance.active ? "维护模式" : "RAW/普通模式", maintenance.active ? "warn" : "");
+  }
+  if (line === "OK" && pendingMaintenance && maintenanceConfirmed) {
     const active = pendingMaintenance === "enter";
     setBadge(byId("maintenanceBadge"), active ? "维护模式" : "RAW/普通模式", active ? "warn" : "");
-    pendingMaintenance = null;
+    clearPendingMaintenance();
   }
-  if (line === "ERROR") pendingMaintenance = null;
+  if (line === "ERROR") {
+    if (lastRequestIsName) {
+      stopBtNamePoll();lastRequestIsName=false;
+      byId("btNameState").textContent=t("名称请求失败，请检查固件支持和连接状态");
+    }
+    clearPendingMaintenance();
+    if (!baudSwitching) clearPendingBaud();
+  }
   updateStatusFromResponse();
 }
 
@@ -127,6 +206,7 @@ async function sendBytes(bytes, note = "") {
 }
 
 async function sendAt(command) {
+  lastRequestIsName=/^AT\+MCUBT/.test(command);
   await sendBytes(buildAtBytes(command), "AT");
 }
 
@@ -161,7 +241,19 @@ client.addEventListener("state", event => {
     appendSystem(`串口已连接：${state.baudRate} 8N1`);
     setConnectionMessage(`已连接 ${identity}，当前串口参数：${state.baudRate}、8N1、无流控。`, "ok");
   } else {
+    stopBtNamePoll();
+    byId("btNameState").textContent=t("连接后查询名称");
+    byId("btNameActual").textContent="";byId("btNameIdentity").textContent="";
+    clearPendingBaud();
+    clearPendingMaintenance();
+    textStream = "";
+    responseWindow = "";
+    decoder.decode();
+    setBadge(byId("maintenanceBadge"), "维护状态未知");
     setBadge(byId("connectionBadge"), "串口未连接");
+    if (!state.unexpected) {
+      setConnectionMessage("串口已断开，可重新连接已授权串口。", "info");
+    }
     if (state.unexpected) {
       appendSystem("串口意外断开，请检查拔插状态");
       setConnectionMessage("串口意外断开，请检查 USB 连接和 USB 转 RS232 设备。", "error");
@@ -171,6 +263,8 @@ client.addEventListener("state", event => {
 
 async function performBaudSwitch(newBaud) {
   baudSwitching = true;
+  if (pendingBaudTimer !== null) clearTimeout(pendingBaudTimer);
+  pendingBaudTimer = null;
   appendSystem(`收到PENDING，准备以${newBaud}重新打开串口`);
   try {
     await new Promise(resolve => setTimeout(resolve, 80));
@@ -182,7 +276,7 @@ async function performBaudSwitch(newBaud) {
   } catch (error) {
     appendSystem(`自动改速失败：${error.message ?? error}；请手动选择新波特率后重连`);
   } finally {
-    pendingBaud = null;
+    clearPendingBaud();
     baudSwitching = false;
   }
 }
@@ -193,8 +287,13 @@ async function enterMaintenance() {
   await sendBytes(new TextEncoder().encode("+++"), "维护保护序列");
   appendSystem("等待1.1秒后静默…");
   if (!await client.waitForSilence(1100, 6000)) throw new Error("+++后出现串口数据，维护入口可能失败");
-  pendingMaintenance = "enter";
-  await sendAt("AT+MCUCFG=1");
+  beginMaintenance("enter");
+  try {
+    await sendAt("AT+MCUCFG=1");
+  } catch (error) {
+    clearPendingMaintenance();
+    throw error;
+  }
 }
 
 function bindForm(id, builder) {
@@ -233,6 +332,11 @@ function init() {
     await client.chooseAndConnect(baud);
     localStorage.setItem("ntn.pc.baud", String(baud));
   }, { connection: true }));
+  byId("connectAuthorizedButton").addEventListener("click", () => runAction(async () => {
+    const baud = Number(byId("baudSelect").value);
+    await client.connectAuthorized(baud);
+    localStorage.setItem("ntn.pc.baud", String(baud));
+  }, { connection: true }));
   byId("disconnectButton").addEventListener("click", () => runAction(() => client.disconnect()));
   byId("refreshPortsButton").addEventListener("click", () => runAction(async () => {
     if (!SerialClient.isSupported()) throw new Error("浏览器不支持Web Serial");
@@ -243,9 +347,17 @@ function init() {
       : "尚未授权串口。点击“选择并连接串口”后，在浏览器弹窗选择 USB 转 RS232 对应的 COM 口。", "info");
   }, { connection: true }));
   document.querySelectorAll("[data-at]").forEach(button => {
-    button.addEventListener("click", () => runAction(() => sendAt(button.dataset.at)));
+    button.addEventListener("click", () => runAction(async () => {
+      await sendAt(button.dataset.at);
+      if (button.dataset.at==="AT+MCUBTNAMEAUTO" || button.dataset.at==="AT+MCUBTREFRESH") startBtNamePoll();
+    }));
   });
 
+  bindForm("btNameForm", data => {
+    const name=String(data.get("btName")??"");
+    if (!/^[A-Za-z0-9_-]{1,31}$/.test(name)) throw new Error("蓝牙名称格式无效");
+    startBtNamePoll();return [`AT+MCUBTNAME=${name}`];
+  });
   bindForm("modeForm", data => [`AT+MCUMODE=${data.get("mode")}`]);
   bindForm("hostForm", data => {
     const host = safeCommandValue(data.get("host"), "主机");
@@ -289,13 +401,27 @@ function init() {
 
   byId("enterMaintenanceButton").addEventListener("click", () => runAction(enterMaintenance));
   byId("exitMaintenanceButton").addEventListener("click", () => runAction(async () => {
-    pendingMaintenance = "exit";
-    await sendAt("AT+MCUCFG=0");
+    beginMaintenance("exit");
+    try {
+      await sendAt("AT+MCUCFG=0");
+    } catch (error) {
+      clearPendingMaintenance();
+      throw error;
+    }
   }));
   byId("changeBaudButton").addEventListener("click", () => runAction(async () => {
     if (pendingBaud) throw new Error("已有改速操作进行中");
     pendingBaud = Number(byId("newBaudSelect").value);
-    await sendAt(`AT+MCURS232=${pendingBaud}`);
+    pendingBaudTimer = setTimeout(() => {
+      clearPendingBaud();
+      appendSystem("改速未收到确认，请核对设备实际波特率后重试");
+    }, 10000);
+    try {
+      await sendAt(`AT+MCURS232=${pendingBaud}`);
+    } catch (error) {
+      clearPendingBaud();
+      throw error;
+    }
   }));
   byId("sendTextButton").addEventListener("click", () => runAction(async () => {
     const ending = lineEndingValue(byId("lineEnding").value);

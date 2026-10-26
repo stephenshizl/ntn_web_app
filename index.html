@@ -31,11 +31,12 @@
       <div class="toolbar">
         <label>波特率
           <select id="baudSelect">
-            <option>9600</option><option>19200</option><option>38400</option>
-            <option>57600</option><option selected>115200</option>
+            <option>9600</option><option selected>19200</option><option>38400</option>
+            <option>57600</option><option>115200</option>
           </select>
         </label>
         <button id="connectButton" class="primary">选择并连接串口</button>
+        <button id="connectAuthorizedButton" class="ghost">连接已授权串口</button>
         <button id="disconnectButton" disabled>断开</button>
         <button id="refreshPortsButton" class="ghost">查看已授权端口</button>
       </div>
@@ -49,7 +50,7 @@
         <button data-at="AT+MCUVER?">固件版本</button>
         <button data-at="AT+MCUCAP?">能力列表</button>
         <button data-at="AT+MCUSTAT?">运行状态</button>
-        <button data-at="AT+MCUCFG?">全部配置</button>
+        <button data-at="AT+MCUCFG?">维护入口状态</button>
         <button data-at="AT+MCUQUEUE?">缓存队列</button>
         <button data-at="AT+MCUGNSS?">GNSS</button>
         <button data-at="AT+MCUTIME?">UTC时间</button>
@@ -68,6 +69,21 @@
     <section class="panel span-2">
       <div class="panel-title"><div><span class="step">03</span><h2>常用配置</h2></div><span class="muted">以设备返回OK为成功依据</span></div>
       <div class="config-grid">
+        <form id="btNameForm" class="config-card">
+          <h3>蓝牙名称</h3>
+          <p id="btNameState">连接后查询名称</p>
+          <p id="btNameActual" style="white-space:pre-wrap;overflow-wrap:anywhere"></p>
+          <p id="btNameIdentity" style="white-space:pre-wrap;overflow-wrap:anywhere"></p>
+          <label>手动名称<input name="btName" required pattern="[A-Za-z0-9_-]{1,31}" placeholder="NTN-SiteA-01"></label>
+          <button type="submit">保存手动名称</button>
+          <div class="toolbar">
+            <button type="button" data-at="AT+MCUBTNAME?">查询名称</button>
+            <button type="button" data-at="AT+MCUBTIDENT?">查询身份</button>
+            <button type="button" data-at="AT+MCUBTNAMEAUTO">恢复自动命名</button>
+            <button type="button" data-at="AT+MCUBTREFRESH">刷新身份</button>
+          </div>
+          <p class="hint">名称限1–31位字母、数字、下划线或连字符。以APPLIED和实际名称为生效依据；DEFERRED表示已保存，断开蓝牙后生效。手动名称可能重名，请按MAC识别。</p>
+        </form>
         <form id="modeForm" class="config-card">
           <h3>工作模式</h3>
           <label>模式<select name="mode"><option value="0">模式0 · AT透传</option><option value="1">模式1 · RAW上行</option></select></label>
