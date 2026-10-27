@@ -9,6 +9,7 @@ test('language switching translates in place and preserves serial log and form v
   const selector={value:'zh',addEventListener(name,fn){this[name]=fn;}};
   const nodes=[{nodeValue:'固件版本',parentElement:{closest:()=>null}},
     {nodeValue:'19200 · 已连接',parentElement:{closest:()=>null}},
+    {nodeValue:'使用说明',parentElement:{closest:()=>null}},
     {nodeValue:'TX 原始HEX 00 FF',parentElement:{closest:()=>({id:'serialLog'})}}];
   const document={title:'NTN终端 PC配置台',documentElement:{lang:'zh-CN'},body:{},
     getElementById:()=>selector,querySelectorAll:()=>[],
@@ -23,8 +24,10 @@ test('language switching translates in place and preserves serial log and form v
   assert.equal(reloads,0,'language selection must not reload the serial page');
   assert.equal(nodes[0].nodeValue,'Firmware version');
   assert.equal(nodes[1].nodeValue,'19200 · Connected');
-  assert.equal(nodes[2].nodeValue,'TX 原始HEX 00 FF');
+  assert.equal(nodes[2].nodeValue,'User guide');
+  assert.equal(nodes[3].nodeValue,'TX 原始HEX 00 FF');
   selector.value='zh';selector.change();
   assert.equal(nodes[0].nodeValue,'固件版本');
+  assert.equal(nodes[2].nodeValue,'使用说明');
   assert.equal(nodes[1].nodeValue,'19200 · 已连接');
 });

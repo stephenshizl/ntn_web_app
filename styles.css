@@ -77,3 +77,12 @@ footer { padding: 0 24px 30px; text-align: center; color: var(--muted); font-siz
   .two-cols, .three-cols { grid-template-columns: 1fr; }
   .baud-change { align-items: stretch; flex-direction: column; }
 }
+
+.guide-open { background: white; color: #18394b; }
+#userGuideDialog { width: min(820px, calc(100vw - 32px)); max-height: 85vh; padding: 0; border: 1px solid var(--line); border-radius: 16px; color: var(--text); background: white; }
+#userGuideDialog::backdrop { background: rgb(11 24 36 / 60%); }
+.guide-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 24px; position: sticky; top: 0; background: white; border-bottom: 1px solid var(--line); }
+.guide-header h2 { margin: 0; font-size: 21px; }
+.guide-content { padding: 0 24px 24px; line-height: 1.75; overflow-wrap: anywhere; }
+.guide-content h3 { font-size: 17px; margin: 22px 0 6px; }
+.guide-content p { margin: 0; }

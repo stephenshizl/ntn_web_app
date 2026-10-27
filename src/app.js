@@ -310,6 +310,8 @@ function bindForm(id, builder) {
 }
 
 function init() {
+  byId("userGuideButton").addEventListener("click", () => byId("userGuideDialog").showModal());
+  byId("userGuideClose").addEventListener("click", () => byId("userGuideDialog").close());
   initI18n();
   const supported = SerialClient.isSupported();
   if (supported) {

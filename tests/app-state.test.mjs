@@ -8,6 +8,7 @@ async function app(supported=true) {
   const elements=new Map();
   const element=id=>{
     if(!elements.has(id))elements.set(id,{id,value:id==='newBaudSelect'?'19200':'',textContent:'',className:'',disabled:false,
+      showModal(){this.open=true;},close(){this.open=false;},
       options:['9600','19200','38400','57600','115200'].map(value=>({value})), handlers:{},
       addEventListener(name,fn){this.handlers[name]=fn;}});
     return elements.get(id);
@@ -126,4 +127,12 @@ test('legacy firmware name ERROR is visible and never reported applied',async()=
   const a=await app();a.startNamePoll();[...a.timers.values()].find(t=>t.interval).fn();await a.settle();
   await a.rx('ERROR\r\n');assert.match(a.element('btNameState').textContent,/名称请求失败/);
   assert.equal([...a.timers.values()].filter(t=>t.interval).length,0);
+});
+
+test('user guide opens and closes without serial writes or disconnect',async()=>{
+  const a=await app(); await a.click('userGuideButton');
+  assert.equal(a.element('userGuideDialog').open,true);
+  await a.click('userGuideClose');
+  assert.equal(a.element('userGuideDialog').open,false);
+  assert.equal(a.client.connected,true); assert.deepEqual(a.client.writes,[]);
 });
