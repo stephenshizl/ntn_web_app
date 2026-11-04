@@ -10,7 +10,8 @@ const client = new SerialClient();
 const decoder = new TextDecoder();
 const logs = [];
 let textStream = "";
-let responseWindow = "";
+let pendingQuery = null;
+let queryTimer = null;
 let pendingMaintenance = null;
 let pendingBaud = null;
 let pendingBaudTimer = null;
@@ -117,14 +118,93 @@ function beginMaintenance(action) {
   }, 8000);
 }
 
-function updateStatusFromResponse() {
-  const status = extractJsonResponse(responseWindow, "+MCUSTAT");
+function resetQuery(message = "点击快捷查询查看设备应答") {
+  if (queryTimer !== null) clearTimeout(queryTimer);
+  queryTimer = null;
+  pendingQuery = null;
+  byId("queryMessage").textContent = t(message);
+  byId("queryMessage").className = "";
+  byId("queryResponse").textContent = "—";
+}
+
+function resetTelemetry() {
+  for (const id of ["firmwareValue", "hardwareValue", "buildValue", "modeValue", "ntnValue",
+    "socketValue", "flashValue", "gnssValue", "errorValue", "timeValue", "rxModeValue"]) {
+    byId(id).textContent = "—";
+  }
+}
+
+async function queryAt(command) {
+  if (pendingQuery) throw new Error("请等待当前查询结束");
+  const prefix = command.replace(/^AT/, "").replace(/\?$/, "");
+  pendingQuery = { command, prefix: prefix === "+MCUQUEUE" ? "+MCUSTAT" : prefix, matched: false, lines: [] };
+  byId("queryResponse").textContent = "—";
+  byId("queryMessage").textContent = `${command} · ${t("等待设备应答")}`;
+  byId("queryMessage").className = "";
+  queryTimer = setTimeout(() => {
+    pendingQuery = null;
+    queryTimer = null;
+    byId("queryMessage").textContent = t("查询超时：请检查波特率、连接和模式1维护状态");
+    byId("queryMessage").className = "error";
+  }, 5000);
+  try {
+    await sendAt(command);
+  } catch (error) {
+    resetQuery("查询发送失败");
+    throw error;
+  }
+}
+
+function updateQueryResponse(line) {
+  if (!pendingQuery) return;
+  if (line.startsWith(`${pendingQuery.prefix}:`)) {
+    pendingQuery.matched = true;
+    const data = extractJsonResponse(line, pendingQuery.prefix);
+    pendingQuery.lines.push(data ? `${pendingQuery.prefix}:\n${JSON.stringify(data, null, 2)}` : line);
+  } else if (/^\+MCUERROR:/.test(line)) {
+    pendingQuery.lines.push(line);
+  } else if (line !== "ERROR" && !(line === "OK" && pendingQuery.matched)) {
+    return;
+  } else {
+    pendingQuery.lines.push(line);
+    byId("queryMessage").textContent = `${pendingQuery.command} · ${t(line === "OK" ? "查询成功" : "设备返回错误")}`;
+    byId("queryMessage").className = line === "ERROR" ? "error" : "";
+    clearTimeout(queryTimer);
+    queryTimer = null;
+    const lines = pendingQuery.lines;
+    pendingQuery = null;
+    byId("queryResponse").textContent = lines.join("\n");
+    return;
+  }
+  byId("queryResponse").textContent = pendingQuery.lines.join("\n");
+}
+
+function updateStatusFromResponse(line) {
+  const version = extractJsonResponse(line, "+MCUVER");
+  if (version) {
+    byId("firmwareValue").textContent = version.fw ?? "—";
+    byId("hardwareValue").textContent = version.hw ?? "—";
+    byId("buildValue").textContent = version.build ?? "—";
+  }
+  const gnss = extractJsonResponse(line, "+MCUGNSS");
+  if (gnss) byId("gnssValue").textContent = gnss.valid === true ? t("定位有效") : gnss.valid === false ? t("未定位") : "—";
+  const rxMode = extractJsonResponse(line, "+MCURXMODE");
+  if (rxMode) byId("rxModeValue").textContent = `${rxMode.name ?? rxMode.saved ?? "—"} (${t("实际生效")}: ${rxMode.effective ?? "—"})`;
+  if (line.startsWith("+MCUTIME:")) {
+    const [valid, utc] = line.slice("+MCUTIME:".length).split(",");
+    byId("timeValue").textContent = valid === "1" && utc ? utc : t("时间无效");
+  }
+  const status = extractJsonResponse(line, "+MCUSTAT");
   if (!status) return;
-  byId("modeValue").textContent = status.mode ?? status.work_mode ?? "—";
-  byId("ntnValue").textContent = status.ntn_state ?? (status.registered ? "REGISTERED" : "—");
+  const mode = status.mode ?? status.work_mode;
+  byId("modeValue").textContent = mode === 0 ? t("模式0 · AT透传") : mode === 1 ? t("模式1 · RAW上行") : mode ?? "—";
+  const registration = ["未注册", "已注册（本地）", "正在搜网", "注册被拒", "网络状态未知", "已注册（漫游）"];
+  byId("ntnValue").textContent = typeof status.registered === "boolean"
+    ? t(status.registered ? "已注册" : "未注册")
+    : t(registration[status.registered] ?? "网络状态未知");
   byId("socketValue").textContent = status.socket_open === true ? "OPEN" : status.socket_open === false ? "CLOSED" : "—";
   byId("flashValue").textContent = status.flash_pending ?? status.flash_used ?? "—";
-  byId("gnssValue").textContent = status.gnss_valid === true ? "VALID" : status.gnss_valid === false ? "INVALID" : "—";
+  byId("gnssValue").textContent = status.gnss_valid === true ? t("定位有效") : status.gnss_valid === false ? t("未定位") : "—";
   byId("errorValue").textContent = status.last_error ?? "0";
 }
 
@@ -143,6 +223,8 @@ function processLine(rawLine) {
   const line = rawLine.trim();
   if (!line) return;
   if (line.includes("[BOOT] NTN-Terminal started")) {
+    resetQuery("设备已重启，请重新查询");
+    resetTelemetry();
     clearPendingBaud();
     clearPendingMaintenance();
     setBadge(byId("maintenanceBadge"), "维护状态未知");
@@ -188,13 +270,13 @@ function processLine(rawLine) {
     clearPendingMaintenance();
     if (!baudSwitching) clearPendingBaud();
   }
-  updateStatusFromResponse();
+  updateStatusFromResponse(line);
+  updateQueryResponse(line);
 }
 
 function consumeText(bytes) {
   const decoded = decoder.decode(bytes, { stream: true });
   textStream += decoded;
-  responseWindow = (responseWindow + decoded).slice(-24000);
   const lines = textStream.split(/\r\n|\r|\n/);
   textStream = lines.pop() ?? "";
   lines.forEach(processLine);
@@ -247,7 +329,8 @@ client.addEventListener("state", event => {
     clearPendingBaud();
     clearPendingMaintenance();
     textStream = "";
-    responseWindow = "";
+    resetQuery("串口已断开，请重新连接并查询");
+    resetTelemetry();
     decoder.decode();
     setBadge(byId("maintenanceBadge"), "维护状态未知");
     setBadge(byId("connectionBadge"), "串口未连接");
@@ -350,7 +433,8 @@ function init() {
   }, { connection: true }));
   document.querySelectorAll("[data-at]").forEach(button => {
     button.addEventListener("click", () => runAction(async () => {
-      await sendAt(button.dataset.at);
+      if (button.dataset.at.endsWith("?")) await queryAt(button.dataset.at);
+      else await sendAt(button.dataset.at);
       if (button.dataset.at==="AT+MCUBTNAMEAUTO" || button.dataset.at==="AT+MCUBTREFRESH") startBtNamePoll();
     }));
   });

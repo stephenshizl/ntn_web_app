@@ -1,4 +1,14 @@
 const zhToEn = {
+  "MCU固件版本": "MCU firmware", "硬件版本": "Hardware version", "编译时间": "Build time",
+  "查询结果": "Query result", "点击快捷查询查看设备应答": "Select a quick query to view the device response",
+  "等待设备应答": "Waiting for device response", "查询成功": "Query successful", "设备返回错误": "Device returned an error",
+  "查询超时：请检查波特率、连接和模式1维护状态": "Query timed out: check baud rate, connection and Mode 1 maintenance",
+  "请等待当前查询结束": "Wait for the current query to finish", "查询发送失败": "Query could not be sent",
+  "串口已断开，请重新连接并查询": "Serial disconnected. Reconnect and query again",
+  "设备已重启，请重新查询": "Device restarted. Query again",
+  "实际生效": "Effective", "定位有效": "Valid fix", "未定位": "No fix", "时间无效": "Invalid time",
+  "未注册": "Not registered", "已注册（本地）": "Registered (home)", "正在搜网": "Searching",
+  "注册被拒": "Registration denied", "网络状态未知": "Network status unknown", "已注册（漫游）": "Registered (roaming)", "已注册": "Registered",
   "使用说明": "User guide",
   "关闭说明": "Close guide",
   "1. 打开网页并连接串口": "1. Open the page and connect",
@@ -90,7 +100,7 @@ function applyLanguage() {
   const nodes = [];
   while (walker.nextNode()) nodes.push(walker.currentNode);
   for (const node of nodes) {
-    if (node.parentElement?.closest("#serialLog, textarea, script, style")) continue;
+    if (node.parentElement?.closest("#serialLog, #queryResponse, textarea, script, style")) continue;
     const value = node.nodeValue;
     const trimmed = value.trim();
     const zh = toChinese(trimmed);

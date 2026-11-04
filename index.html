@@ -78,12 +78,22 @@
         <button data-at="AT+MCURXMODE?">接收模式</button>
       </div>
       <div class="telemetry-grid">
+        <article><span>MCU固件版本</span><strong id="firmwareValue">—</strong></article>
+        <article><span>硬件版本</span><strong id="hardwareValue">—</strong></article>
+        <article><span>编译时间</span><strong id="buildValue">—</strong></article>
         <article><span>工作模式</span><strong id="modeValue">—</strong></article>
         <article><span>NTN状态</span><strong id="ntnValue">—</strong></article>
         <article><span>Socket</span><strong id="socketValue">—</strong></article>
         <article><span>Flash待发</span><strong id="flashValue">—</strong></article>
         <article><span>GNSS</span><strong id="gnssValue">—</strong></article>
         <article><span>最近错误</span><strong id="errorValue">—</strong></article>
+        <article><span>UTC时间</span><strong id="timeValue">—</strong></article>
+        <article><span>接收模式</span><strong id="rxModeValue">—</strong></article>
+      </div>
+      <div class="query-result">
+        <h3>查询结果</h3>
+        <p id="queryMessage" role="status" aria-live="polite">点击快捷查询查看设备应答</p>
+        <pre id="queryResponse">—</pre>
       </div>
     </section>
 

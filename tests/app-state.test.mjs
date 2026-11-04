@@ -34,6 +34,7 @@ async function app(supported=true) {
   const click=async id=>{element(id).handlers.click();await settle();};
   const rx=async text=>{client.emit('rx',new TextEncoder().encode(text));await settle();};
   return {client,element,click,rx,settle,timers,
+    query:command=>vm.runInNewContext(`queryAt(${JSON.stringify(command)})`,context),
     startNamePoll:()=>vm.runInNewContext('startBtNamePoll()',context),
     async submitName(value){element('btNameForm').fields={btName:value};element('btNameForm').handlers.submit({preventDefault(){},currentTarget:element('btNameForm')});await settle();}};
 }
@@ -135,4 +136,62 @@ test('user guide opens and closes without serial writes or disconnect',async()=>
   await a.click('userGuideClose');
   assert.equal(a.element('userGuideDialog').open,false);
   assert.equal(a.client.connected,true); assert.deepEqual(a.client.writes,[]);
+});
+
+test('fragmented version response is displayed only after a complete line and matching OK',async()=>{
+  const a=await app();await a.query('AT+MCUVER?');
+  await a.rx('OK\r\n');
+  assert.match(a.element('queryMessage').textContent,/等待设备应答/);
+  const response='\r\n+MCUVER:{"fw":"V3.0.0","hw":"HC32F460-V2.0","build":"Nov 4 2026 15:12:47"}\r\nOK\r\n';
+  for(const byte of response)await a.rx(byte);
+  assert.equal(a.element('firmwareValue').textContent,'V3.0.0');
+  assert.equal(a.element('hardwareValue').textContent,'HC32F460-V2.0');
+  assert.equal(a.element('buildValue').textContent,'Nov 4 2026 15:12:47');
+  assert.match(a.element('queryMessage').textContent,/查询成功/);
+  assert.match(a.element('queryResponse').textContent,/"fw": "V3.0.0"/);
+  assert.match(a.element('queryResponse').textContent,/OK$/);
+  assert.equal([...a.timers.values()].filter(t=>t.ms===5000).length,0);
+});
+
+test('all quick response formats display data, including queue alias and CSV time',async()=>{
+  const a=await app();
+  for(const [command,response] of [
+    ['AT+MCUCAP?','+MCUCAP:{"udp":true,"upgrade":false}'],
+    ['AT+MCUCFG?','+MCUCFG:{"pc_entry_enabled":1,"active":false}'],
+    ['AT+MCUQUEUE?','+MCUSTAT:{"mode":0,"ntn_state":0,"registered":4,"flash_pending":0}'],
+    ['AT+MCUGNSS?','+MCUGNSS:{"valid":false,"sats":0}'],
+    ['AT+MCUTIME?','+MCUTIME:0,,GNSS,4294967295'],
+    ['AT+MCURXMODE?','+MCURXMODE:{"saved":0,"effective":-1,"name":"QUERY"}']
+  ]) {
+    await a.query(command);await a.rx(response+'\r\nOK\r\n');
+    assert.match(a.element('queryMessage').textContent,/查询成功/);
+    assert.notEqual(a.element('queryResponse').textContent,'—');
+  }
+  assert.equal(a.element('ntnValue').textContent,'网络状态未知');
+  assert.equal(a.element('gnssValue').textContent,'未定位');
+  assert.equal(a.element('timeValue').textContent,'时间无效');
+  assert.match(a.element('rxModeValue').textContent,/QUERY.*-1/);
+  await a.rx('+MCUTIME:1,2026-11-04T10:00:00Z,GNSS,0\r\n');
+  assert.equal(a.element('timeValue').textContent,'2026-11-04T10:00:00Z');
+});
+
+test('new GNSS response is not overwritten by an old status response',async()=>{
+  const a=await app();await a.rx('+MCUSTAT:{"gnss_valid":false}\r\nOK\r\n');
+  await a.rx('+MCUGNSS:{"valid":true}\r\nOK\r\n');
+  assert.equal(a.element('gnssValue').textContent,'定位有效');
+});
+
+test('query errors and timeouts are visible and disconnect clears stale device information',async()=>{
+  const a=await app();await a.query('AT+MCUVER?');
+  await assert.rejects(a.query('AT+MCUCAP?'),/等待/);
+  await a.rx('+MCUERROR:6\r\nERROR\r\n');
+  assert.match(a.element('queryMessage').textContent,/设备返回错误/);
+  assert.match(a.element('queryResponse').textContent,/MCUERROR:6/);
+  await a.query('AT+MCUVER?');
+  [...a.timers.values()].find(t=>t.ms===5000).fn();
+  assert.match(a.element('queryMessage').textContent,/查询超时/);
+  await a.query('AT+MCUVER?');await a.rx('+MCUVER:{"fw":"V3.0.0"}\r\nOK\r\n');
+  a.client.emit('state',{connected:false});
+  assert.equal(a.element('firmwareValue').textContent,'—');
+  assert.equal(a.element('queryResponse').textContent,'—');
 });
