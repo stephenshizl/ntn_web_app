@@ -1,5 +1,25 @@
 const encoder = new TextEncoder();
 
+export function parseRegistration(text) {
+  const match = String(text).match(/^\+CEREG:[ \t]*(\d+)(?:[ \t]*,[ \t]*(\d+)(?:[ \t]*,.*)?)?[ \t]*\r?$/m);
+  return match ? Number(match[2] ?? match[1]) : null;
+}
+
+export function registrationLabel(stat) {
+  return ["未入网", "已入网（本地）", "正在搜网", "入网被拒", "入网状态未知", "已入网（漫游）"][stat] ?? "入网状态未知";
+}
+
+export function parseSimState(text) {
+  const match = String(text).match(/^\+CPIN:[ \t]*([^\r\n]+)\r?$/m);
+  return match ? match[1].trim().toUpperCase() : null;
+}
+
+export function simStateLabel(state) {
+  return ({ READY: "已插卡，SIM就绪", "SIM PIN": "已插卡，需要PIN", "SIM PUK": "已插卡，需要PUK",
+    "SIM PIN2": "已插卡，需要PIN2", "SIM PUK2": "已插卡，需要PUK2",
+    "NOT READY": "SIM未就绪（未插卡或不可用）", "NOT INSERTED": "未插卡" })[state] ?? "SIM状态未知";
+}
+
 export class ReadableSerialLog {
   constructor() { this.clear(); }
 

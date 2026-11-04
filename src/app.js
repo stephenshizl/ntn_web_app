@@ -2,7 +2,8 @@ import { SerialClient } from "./serial-client.js";
 import { initI18n, t } from "./i18n.js";
 import {
   buildAtBytes, buildTextBytes, bytesToEscapedText, bytesToHex,
-  extractJsonResponse, lineEndingValue, parseHex, safeCommandValue, ReadableSerialLog
+  extractJsonResponse, lineEndingValue, parseHex, safeCommandValue, ReadableSerialLog,
+  parseRegistration, registrationLabel, parseSimState, simStateLabel
 } from "./protocol.js";
 
 const byId = id => document.getElementById(id);
@@ -13,6 +14,9 @@ const readableLog = new ReadableSerialLog();
 let textStream = "";
 let pendingQuery = null;
 let queryTimer = null;
+let effectiveMode = null;
+let networkRefreshTimer = null;
+let commandInFlight = false;
 let pendingMaintenance = null;
 let pendingBaud = null;
 let pendingBaudTimer = null;
@@ -95,7 +99,7 @@ function setControls(connected) {
   byId("connectButton").disabled = connected || !SerialClient.isSupported();
   byId("disconnectButton").disabled = !connected;
   byId("connectAuthorizedButton").disabled = connected || !SerialClient.isSupported();
-  document.querySelectorAll("[data-at], form button, #sendTextButton, #sendHexButton, #enterMaintenanceButton, #exitMaintenanceButton, #changeBaudButton")
+  document.querySelectorAll("[data-at], form button, #sendTextButton, #sendHexButton, #enterMaintenanceButton, #exitMaintenanceButton, #changeBaudButton, #networkQueryButton, #simQueryButton")
     .forEach(button => { button.disabled = !connected; });
 }
 
@@ -133,8 +137,10 @@ function resetQuery(message = "点击快捷查询查看设备应答") {
 }
 
 function resetTelemetry() {
+  effectiveMode = null;
+  stopNetworkRefresh();
   for (const id of ["firmwareValue", "hardwareValue", "buildValue", "modeValue", "ntnValue",
-    "socketValue", "flashValue", "gnssValue", "errorValue", "timeValue", "rxModeValue"]) {
+    "socketValue", "flashValue", "gnssValue", "errorValue", "timeValue", "rxModeValue", "networkValue", "simValue"]) {
     byId(id).textContent = "—";
   }
 }
@@ -147,6 +153,7 @@ async function queryAt(command) {
   byId("queryMessage").textContent = `${command} · ${t("等待设备应答")}`;
   byId("queryMessage").className = "";
   queryTimer = setTimeout(() => {
+    if (pendingQuery) finishModemStatus(pendingQuery, false);
     pendingQuery = null;
     queryTimer = null;
     byId("queryMessage").textContent = t("查询超时：请检查波特率、连接和模式1维护状态");
@@ -155,9 +162,31 @@ async function queryAt(command) {
   try {
     await sendAt(command);
   } catch (error) {
+    if (pendingQuery) finishModemStatus(pendingQuery, false);
     resetQuery("查询发送失败");
     throw error;
   }
+}
+
+function finishModemStatus(query, ok) {
+  const network = query.command === "AT+CEREG?";
+  if (!network && query.command !== "AT+CPIN?") return;
+  const value = network ? parseRegistration(query.lines.join("\n")) : parseSimState(query.lines.join("\n"));
+  byId(network ? "networkValue" : "simValue").textContent = ok && value !== null
+    ? t(network ? registrationLabel(value) : simStateLabel(value)) : t("查询失败，状态未知");
+}
+
+async function queryModemStatus(sim = false) {
+  if (effectiveMode !== 0) throw new Error("请先在模式0下查询运行状态；模式1请使用蓝牙App");
+  if (pendingMaintenance || pendingBaud || baudSwitching || commandInFlight || pendingQuery) throw new Error("当前通道忙，请稍后查询");
+  byId(sim ? "simValue" : "networkValue").textContent = t("等待设备应答");
+  await queryAt(sim ? "AT+CPIN?" : "AT+CEREG?");
+}
+
+function stopNetworkRefresh() {
+  if (networkRefreshTimer !== null) clearInterval(networkRefreshTimer);
+  networkRefreshTimer = null;
+  byId("networkAutoRefresh").checked = false;
 }
 
 function updateQueryResponse(line) {
@@ -168,12 +197,13 @@ function updateQueryResponse(line) {
     pendingQuery.lines.push(data ? `${pendingQuery.prefix}:\n${JSON.stringify(data, null, 2)}` : line);
   } else if (/^\+MCUERROR:/.test(line)) {
     pendingQuery.lines.push(line);
-  } else if (line !== "ERROR" && !(line === "OK" && pendingQuery.matched)) {
+  } else if (!/^(ERROR|\+CME ERROR:.*|\+CMS ERROR:.*)$/.test(line) && !(line === "OK" && pendingQuery.matched)) {
     return;
   } else {
+    finishModemStatus(pendingQuery, line === "OK");
     pendingQuery.lines.push(line);
     byId("queryMessage").textContent = `${pendingQuery.command} · ${t(line === "OK" ? "查询成功" : "设备返回错误")}`;
-    byId("queryMessage").className = line === "ERROR" ? "error" : "";
+    byId("queryMessage").className = line === "OK" ? "" : "error";
     clearTimeout(queryTimer);
     queryTimer = null;
     const lines = pendingQuery.lines;
@@ -202,6 +232,10 @@ function updateStatusFromResponse(line) {
   const status = extractJsonResponse(line, "+MCUSTAT");
   if (!status) return;
   const mode = status.mode ?? status.work_mode;
+  if (mode === 0 || mode === 1) {
+    effectiveMode = mode;
+    if (mode !== 0) stopNetworkRefresh();
+  }
   byId("modeValue").textContent = mode === 0 ? t("模式0 · AT透传") : mode === 1 ? t("模式1 · RAW上行") : mode ?? "—";
   const registration = ["未注册", "已注册（本地）", "正在搜网", "注册被拒", "网络状态未知", "已注册（漫游）"];
   byId("ntnValue").textContent = typeof status.registered === "boolean"
@@ -227,7 +261,9 @@ function startBtNamePoll() {
 function processLine(rawLine) {
   const line = rawLine.trim();
   if (!line) return;
+  if (/^(OK|ERROR|\+CME ERROR:.*|\+CMS ERROR:.*)$/.test(line)) commandInFlight = false;
   if (line.includes("[BOOT] NTN-Terminal started")) {
+    commandInFlight = false;
     resetQuery("设备已重启，请重新查询");
     resetTelemetry();
     clearPendingBaud();
@@ -251,6 +287,11 @@ function processLine(rawLine) {
     clearPendingBaud();
   }
   const mode = extractJsonResponse(line, "+MCUMODE");
+  const reportedMode = applied?.mode ?? mode?.effective;
+  if (reportedMode === 0 || reportedMode === 1) {
+    effectiveMode = reportedMode;
+    if (reportedMode !== 0) stopNetworkRefresh();
+  }
   if (applied?.mode === 0 || mode?.effective === 0) {
     clearPendingMaintenance();
     setBadge(byId("maintenanceBadge"), "RAW/普通模式");
@@ -288,7 +329,9 @@ function consumeText(bytes) {
 }
 
 async function sendBytes(bytes, note = "") {
-  await client.write(bytes);
+  commandInFlight = true;
+  try { await client.write(bytes); }
+  catch (error) { commandInFlight = false; throw error; }
   appendLog("TX", bytes, note);
 }
 
@@ -328,6 +371,7 @@ client.addEventListener("state", event => {
     appendSystem(`串口已连接：${state.baudRate} 8N1`);
     setConnectionMessage(`已连接 ${identity}，当前串口参数：${state.baudRate}、8N1、无流控。`, "ok");
   } else {
+    commandInFlight = false;
     stopBtNamePoll();
     byId("btNameState").textContent=t("连接后查询名称");
     byId("btNameActual").textContent="";byId("btNameIdentity").textContent="";
@@ -416,6 +460,24 @@ function init() {
     byId("baudSelect").value = savedBaud;
   }
   setControls(false);
+
+  byId("networkQueryButton").addEventListener("click", () => runAction(() => queryModemStatus(false)));
+  byId("simQueryButton").addEventListener("click", () => runAction(() => queryModemStatus(true)));
+  byId("networkAutoRefresh").addEventListener("change", () => {
+    const enabled = byId("networkAutoRefresh").checked;
+    stopNetworkRefresh();
+    if (!enabled) return;
+    if (!client.connected || effectiveMode !== 0) {
+      showTransientActionError(new Error("请先在模式0下查询运行状态；模式1请使用蓝牙App"));
+      return;
+    }
+    byId("networkAutoRefresh").checked = true;
+    networkRefreshTimer = setInterval(() => {
+      if (!client.connected || document.hidden || effectiveMode !== 0 || commandInFlight || pendingQuery || pendingMaintenance || pendingBaud || baudSwitching || btNamePoll) return;
+      void runAction(() => queryModemStatus(false));
+    }, 5000);
+    if (!pendingQuery) void runAction(() => queryModemStatus(false));
+  });
 
   byId("connectButton").addEventListener("click", () => runAction(async () => {
     const baud = Number(byId("baudSelect").value);

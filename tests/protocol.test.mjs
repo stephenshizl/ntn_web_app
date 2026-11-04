@@ -2,7 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   buildAtBytes, bytesToEscapedText, bytesToHex, extractJsonResponse,
-  lineEndingValue, parseHex, safeCommandValue, ReadableSerialLog
+  lineEndingValue, parseHex, safeCommandValue, ReadableSerialLog,
+  parseRegistration, registrationLabel, parseSimState, simStateLabel
 } from "../src/protocol.js";
 
 test("HEX输入支持常见分隔并保持二进制", () => {
@@ -74,5 +75,25 @@ test('text log clear and disconnect cannot merge data across sessions', () => {
   assert.deepEqual(log.lines.map(line => line.text), ['OK']);
   log.append('TX', new Uint8Array([0, 255]), time, 'RAW HEX');
   assert.equal(log.lines.at(-1).text, 'HEX 00 FF');
+});
+
+test('registration query reads stat rather than reporting mode and rejects malformed replies', () => {
+  for (const stat of [0,1,2,3,4,5]) assert.equal(parseRegistration(`+CEREG: 1,${stat}`), stat);
+  assert.equal(parseRegistration('+CEREG: 2,5,"1234","12345678",14'),5);
+  assert.equal(parseRegistration('+CEREG: 2'),2);
+  assert.equal(parseRegistration('+CEREG: 0,invalid'),null);
+  assert.equal(parseRegistration('ERROR'),null);
+  assert.equal(registrationLabel(1),'已入网（本地）');
+  assert.equal(registrationLabel(5),'已入网（漫游）');
+  assert.equal(registrationLabel(4),'入网状态未知');
+});
+
+test('SIM readiness distinguishes inserted locked cards from unavailable or unknown cards', () => {
+  assert.equal(parseSimState('+CPIN: READY'),'READY');
+  for (const state of ['READY','SIM PIN','SIM PUK','SIM PIN2','SIM PUK2']) assert.match(simStateLabel(state),/已插卡/);
+  assert.equal(parseSimState('+CPIN: NOT READY'),'NOT READY');
+  assert.match(simStateLabel('NOT READY'),/未插卡或不可用/);
+  assert.equal(parseSimState('+CME ERROR: 13'),null);
+  assert.equal(simStateLabel(null),'SIM状态未知');
 });
 

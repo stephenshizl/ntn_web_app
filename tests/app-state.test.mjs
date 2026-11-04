@@ -34,6 +34,7 @@ async function app(supported=true) {
   const click=async id=>{element(id).handlers.click();await settle();};
   const rx=async text=>{client.emit('rx',new TextEncoder().encode(text));await settle();};
   return {client,element,click,rx,settle,timers,
+    setHidden:value=>{context.document.hidden=value;},
     query:command=>vm.runInNewContext(`queryAt(${JSON.stringify(command)})`,context),
     startNamePoll:()=>vm.runInNewContext('startBtNamePoll()',context),
     async submitName(value){element('btNameForm').fields={btName:value};element('btNameForm').handlers.submit({preventDefault(){},currentTarget:element('btNameForm')});await settle();}};
@@ -214,4 +215,44 @@ test('default log combines RX fragments while raw TXT/HEX preserves original chu
   assert.equal(a.element('rawLog').textContent,'');
   await a.rx('OK\r\n');
   assert.equal(a.element('serialLog').textContent.split('\n').length,1);
+});
+
+test('new modem queries cannot write data in unknown mode or RAW mode',async()=>{
+  const a=await app();await a.click('networkQueryButton');await a.click('simQueryButton');
+  assert.deepEqual(a.client.writes,[]);
+  await a.rx('+MCUSTAT:{"mode":1}\r\nOK\r\n');
+  await a.click('networkQueryButton');assert.deepEqual(a.client.writes,[]);
+  await a.rx('+MCUSTAT:{"mode":0}\r\nOK\r\n');
+  await a.click('networkQueryButton');
+  assert.equal(a.client.writes.at(-1),'AT+CEREG?\r\n');
+  await a.rx('AT+CEREG?\r+CEREG:1,5\r\nOK\r\n');
+  assert.equal(a.element('networkValue').textContent,'已入网（漫游）');
+  await a.click('simQueryButton');await a.rx('+CPIN:SIM PIN\r\nOK\r\n');
+  assert.equal(a.element('simValue').textContent,'已插卡，需要PIN');
+  await a.click('simQueryButton');await a.rx('+CME ERROR: 13\r\n');
+  assert.equal(a.element('simValue').textContent,'查询失败，状态未知');
+  assert.match(a.element('queryMessage').textContent,/设备返回错误/);
+});
+
+test('network auto refresh is opt-in, runs at 5 seconds and pauses while hidden or busy',async()=>{
+  const a=await app();
+  assert.equal([...a.timers.values()].filter(t=>t.interval&&t.ms===5000).length,0);
+  await a.rx('+MCUSTAT:{"mode":0}\r\nOK\r\n');
+  a.element('networkAutoRefresh').checked=true;a.element('networkAutoRefresh').handlers.change();await a.settle();
+  const timer=[...a.timers.values()].find(t=>t.interval&&t.ms===5000);assert.ok(timer);
+  assert.deepEqual(a.client.writes,['AT+CEREG?\r\n']);
+  timer.fn();await a.settle();assert.equal(a.client.writes.length,1);
+  await a.rx('+CEREG:1,2\r\nOK\r\n');
+  a.setHidden(true);timer.fn();await a.settle();assert.equal(a.client.writes.length,1);
+  a.setHidden(false);timer.fn();await a.settle();assert.equal(a.client.writes.length,2);
+  await a.rx('+CEREG:1,1\r\nOK\r\n');
+  assert.equal(a.element('networkValue').textContent,'已入网（本地）');
+  await a.query('AT+MCUVER?');timer.fn();await a.settle();assert.equal(a.client.writes.length,3);
+  await a.rx('+MCUVER:{"fw":"V3.0.0"}\r\nOK\r\n');
+  await a.rx('+MCUAPPLY:{"mode":1}\r\nOK\r\n');
+  assert.equal(a.element('networkAutoRefresh').checked,false);
+  assert.equal([...a.timers.values()].filter(t=>t.interval&&t.ms===5000).length,0);
+  a.client.emit('state',{connected:false});
+  assert.equal(a.element('networkValue').textContent,'—');
+  assert.equal(a.element('simValue').textContent,'—');
 });

@@ -1,4 +1,13 @@
 const zhToEn = {
+  "查询NTN入网": "Query NTN registration", "查询SIM状态": "Query SIM status", "网络状态每5秒更新": "Refresh network every 5 seconds",
+  "NTN入网查询": "NTN registration query", "SIM状态查询": "SIM status query",
+  "仅在已确认的模式0下查询；请先查询运行状态。模式1请使用蓝牙App。NOT READY不能单独证明未插卡。": "Query only after Mode 0 is confirmed by Runtime status. Use the Bluetooth app in Mode 1. NOT READY alone does not prove the SIM is absent.",
+  "请先在模式0下查询运行状态；模式1请使用蓝牙App": "First query Runtime status in Mode 0; use the Bluetooth app in Mode 1",
+  "当前通道忙，请稍后查询": "Channel busy; query again later", "查询失败，状态未知": "Query failed; status unknown",
+  "未入网": "Not registered", "已入网（本地）": "Registered (home)", "入网被拒": "Registration denied", "入网状态未知": "Registration unknown", "已入网（漫游）": "Registered (roaming)",
+  "已插卡，SIM就绪": "SIM inserted and ready", "已插卡，需要PIN": "SIM inserted; PIN required", "已插卡，需要PUK": "SIM inserted; PUK required",
+  "已插卡，需要PIN2": "SIM inserted; PIN2 required", "已插卡，需要PUK2": "SIM inserted; PUK2 required",
+  "SIM未就绪（未插卡或不可用）": "SIM not ready (absent or unavailable)", "未插卡": "SIM absent", "SIM状态未知": "SIM status unknown",
   "显示方式": "Log view", "按行文本": "Text lines", "原始TXT / HEX": "Raw TXT / HEX",
   "MCU固件版本": "MCU firmware", "硬件版本": "Hardware version", "编译时间": "Build time",
   "查询结果": "Query result", "点击快捷查询查看设备应答": "Select a quick query to view the device response",

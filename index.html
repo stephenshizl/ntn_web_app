@@ -90,6 +90,16 @@
         <article><span>UTC时间</span><strong id="timeValue">—</strong></article>
         <article><span>接收模式</span><strong id="rxModeValue">—</strong></article>
       </div>
+      <div class="toolbar modem-toolbar">
+        <button id="networkQueryButton">查询NTN入网</button>
+        <button id="simQueryButton">查询SIM状态</button>
+        <label class="inline-check"><input id="networkAutoRefresh" type="checkbox">网络状态每5秒更新</label>
+      </div>
+      <p class="hint">仅在已确认的模式0下查询；请先查询运行状态。模式1请使用蓝牙App。NOT READY不能单独证明未插卡。</p>
+      <div class="telemetry-grid">
+        <article><span>NTN入网查询</span><strong id="networkValue">—</strong></article>
+        <article><span>SIM状态查询</span><strong id="simValue">—</strong></article>
+      </div>
       <div class="query-result">
         <h3>查询结果</h3>
         <p id="queryMessage" role="status" aria-live="polite">点击快捷查询查看设备应答</p>
