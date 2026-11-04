@@ -2,13 +2,14 @@ import { SerialClient } from "./serial-client.js";
 import { initI18n, t } from "./i18n.js";
 import {
   buildAtBytes, buildTextBytes, bytesToEscapedText, bytesToHex,
-  extractJsonResponse, lineEndingValue, parseHex, safeCommandValue
+  extractJsonResponse, lineEndingValue, parseHex, safeCommandValue, ReadableSerialLog
 } from "./protocol.js";
 
 const byId = id => document.getElementById(id);
 const client = new SerialClient();
 const decoder = new TextDecoder();
 const logs = [];
+const readableLog = new ReadableSerialLog();
 let textStream = "";
 let pendingQuery = null;
 let queryTimer = null;
@@ -76,10 +77,14 @@ function appendLog(direction, bytes, note = "") {
   if (logs.length > 3000) logs.splice(0, logs.length - 3000);
   const line = `[${entry.time.slice(11, 23)}] ${direction.padEnd(6)} ${note}${note ? " " : ""}len=${bytes.length}\n` +
     `  TXT ${entry.text || "(empty)"}\n  HEX ${entry.hex || "(empty)"}\n`;
-  const target = byId("serialLog");
+  const target = byId("rawLog");
   target.textContent += line;
   if (target.textContent.length > 600000) target.textContent = target.textContent.slice(-450000);
   target.scrollTop = target.scrollHeight;
+  readableLog.append(direction, bytes, entry.time, note);
+  const readable = byId("serialLog");
+  readable.textContent = readableLog.toString();
+  readable.scrollTop = readable.scrollHeight;
 }
 
 function appendSystem(message) {
@@ -332,6 +337,7 @@ client.addEventListener("state", event => {
     resetQuery("串口已断开，请重新连接并查询");
     resetTelemetry();
     decoder.decode();
+    readableLog.endReceive();
     setBadge(byId("maintenanceBadge"), "维护状态未知");
     setBadge(byId("connectionBadge"), "串口未连接");
     if (!state.unexpected) {
@@ -520,7 +526,16 @@ function init() {
   }));
   byId("clearLogButton").addEventListener("click", () => {
     logs.length = 0;
+    readableLog.clear();
     byId("serialLog").textContent = "";
+    byId("rawLog").textContent = "";
+  });
+  byId("logView").addEventListener("change", () => {
+    const raw = byId("logView").value === "raw";
+    byId("serialLog").hidden = raw;
+    byId("rawLog").hidden = !raw;
+    const visible = byId(raw ? "rawLog" : "serialLog");
+    visible.scrollTop = visible.scrollHeight;
   });
   byId("exportLogButton").addEventListener("click", () => {
     const blob = new Blob([logs.map(entry => JSON.stringify(entry)).join("\n") + "\n"], { type: "application/x-ndjson;charset=utf-8" });

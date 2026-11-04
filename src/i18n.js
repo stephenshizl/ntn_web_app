@@ -1,4 +1,5 @@
 const zhToEn = {
+  "显示方式": "Log view", "按行文本": "Text lines", "原始TXT / HEX": "Raw TXT / HEX",
   "MCU固件版本": "MCU firmware", "硬件版本": "Hardware version", "编译时间": "Build time",
   "查询结果": "Query result", "点击快捷查询查看设备应答": "Select a quick query to view the device response",
   "等待设备应答": "Waiting for device response", "查询成功": "Query successful", "设备返回错误": "Device returned an error",
@@ -100,7 +101,7 @@ function applyLanguage() {
   const nodes = [];
   while (walker.nextNode()) nodes.push(walker.currentNode);
   for (const node of nodes) {
-    if (node.parentElement?.closest("#serialLog, #queryResponse, textarea, script, style")) continue;
+    if (node.parentElement?.closest("#serialLog, #rawLog, #queryResponse, textarea, script, style")) continue;
     const value = node.nodeValue;
     const trimmed = value.trim();
     const zh = toChinese(trimmed);

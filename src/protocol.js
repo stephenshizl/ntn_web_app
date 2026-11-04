@@ -1,5 +1,46 @@
 const encoder = new TextEncoder();
 
+export class ReadableSerialLog {
+  constructor() { this.clear(); }
+
+  clear() {
+    this.lines = [];
+    this.pending = null;
+    this.decoder = new TextDecoder();
+  }
+
+  endReceive() {
+    const tail = this.decoder.decode();
+    if (tail && this.pending) this.pending.text += tail;
+    this.pending = null;
+  }
+
+  append(direction, bytes, time, note = "") {
+    if (direction !== "RX") this.pending = null;
+    const text = note === "RAW HEX" ? bytesToHex(bytes)
+      : direction === "RX" ? this.decoder.decode(bytes, { stream: true }) : new TextDecoder().decode(bytes);
+    for (const character of text) {
+      if (character === "\r" || character === "\n") {
+        this.pending = null;
+        continue;
+      }
+      if (!this.pending) {
+        this.pending = { time, direction, text: note === "RAW HEX" ? "HEX " : "" };
+        this.lines.push(this.pending);
+      }
+      this.pending.text += /[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/.test(character)
+        ? bytesToEscapedText(new Uint8Array([character.charCodeAt(0)])) : character;
+    }
+    if (direction !== "RX") this.pending = null;
+    if (this.lines.length > 3000) this.lines.splice(0, this.lines.length - 3000);
+    if (this.pending?.text.length > 450000) this.pending.text = this.pending.text.slice(-450000);
+  }
+
+  toString() {
+    return this.lines.map(line => `[${line.time.slice(11, 23)}] ${line.direction.padEnd(6)} ${line.text}`).join("\n").slice(-600000);
+  }
+}
+
 export function bytesToHex(bytes) {
   return Array.from(bytes, value => value.toString(16).padStart(2, "0").toUpperCase()).join(" ");
 }

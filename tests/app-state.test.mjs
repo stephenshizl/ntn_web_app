@@ -195,3 +195,23 @@ test('query errors and timeouts are visible and disconnect clears stale device i
   assert.equal(a.element('firmwareValue').textContent,'—');
   assert.equal(a.element('queryResponse').textContent,'—');
 });
+
+test('default log combines RX fragments while raw TXT/HEX preserves original chunks',async()=>{
+  const a=await app();
+  for(const chunk of ['a','t\r','O','K\r\n'])await a.rx(chunk);
+  assert.equal(a.element('serialLog').textContent.split('\n').length,2);
+  assert.match(a.element('serialLog').textContent,/RX\s+at\n.*RX\s+OK$/);
+  assert.match(a.element('rawLog').textContent,/len=1\n  TXT a\n  HEX 61/);
+  assert.match(a.element('rawLog').textContent,/len=2\n  TXT t\\r\n  HEX 74 0D/);
+  a.element('logView').value='raw';a.element('logView').handlers.change();
+  assert.equal(a.element('serialLog').hidden,true);
+  assert.equal(a.element('rawLog').hidden,false);
+  a.element('logView').value='text';a.element('logView').handlers.change();
+  assert.equal(a.element('serialLog').hidden,false);
+  assert.equal(a.element('rawLog').hidden,true);
+  await a.click('clearLogButton');
+  assert.equal(a.element('serialLog').textContent,'');
+  assert.equal(a.element('rawLog').textContent,'');
+  await a.rx('OK\r\n');
+  assert.equal(a.element('serialLog').textContent.split('\n').length,1);
+});

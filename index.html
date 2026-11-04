@@ -179,10 +179,14 @@
     <section class="panel span-2 log-panel">
       <div class="panel-title">
         <div><span class="step">06</span><h2>实时记录</h2></div>
-        <div class="toolbar compact"><button id="clearLogButton" class="ghost">清空</button><button id="exportLogButton">导出日志</button></div>
+        <div class="toolbar compact">
+          <label>显示方式<select id="logView"><option value="text">按行文本</option><option value="raw">原始TXT / HEX</option></select></label>
+          <button id="clearLogButton" class="ghost">清空</button><button id="exportLogButton">导出日志</button>
+        </div>
       </div>
       <pre id="serialLog" aria-live="polite">等待串口连接…
 </pre>
+      <pre id="rawLog" hidden></pre>
     </section>
   </main>
 
