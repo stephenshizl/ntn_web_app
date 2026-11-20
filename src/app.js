@@ -419,7 +419,7 @@ async function upgradeMcu(recovery) {
   const appBaud = client.baudRate;
   const rawMode = effectiveMode === 1;
   const encode = value => new TextEncoder().encode(value);
-  otaInput = new OtaInput();
+  otaInput = new OtaInput(line => appendSystem(line));
   otaCanCancel = true;
   otaBinaryTransfer = false;
   setControls(client.connected);

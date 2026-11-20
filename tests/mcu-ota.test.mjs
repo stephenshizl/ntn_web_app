@@ -32,6 +32,16 @@ test("YMODEM frames carry sequence complement, padding and CRC", () => {
   assert.notEqual(frame[131] | frame[132], 0);
 });
 
+test("diagnostic lines are logged without consuming the READY handshake", async () => {
+  const messages = [];
+  const input = new OtaInput(line => messages.push(line));
+  input.push(new TextEncoder().encode("\0BOOT2 INFO BL1_OK NOR_OK APP_VERIFIED\r\nREADY 1 1 376832\r\n"));
+  assert.equal(await input.line(50, line => line.startsWith("READY ")), "READY 1 1 376832");
+  assert.deepEqual(messages, ["BOOT2 INFO BL1_OK NOR_OK APP_VERIFIED"]);
+  input.push(new TextEncoder().encode("BOOT1 ERROR BL2_SHA256\r\n"));
+  await assert.rejects(input.line(50, () => false), /BL2_SHA256/);
+});
+
 test("transfers a package across block number rollover and retries a rejected block", async () => {
   const input = new OtaInput();
   const data = sample();

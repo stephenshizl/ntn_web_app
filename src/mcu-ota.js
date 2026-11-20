@@ -48,10 +48,11 @@ export function firmwareFrame(sequence, data, blockSize = 1024, padding = 0x1a) 
 }
 
 export class OtaInput {
-  constructor() {
+  constructor(onBootLog = () => {}) {
     this.bytes = [];
     this.waiter = null;
     this.closed = false;
+    this.onBootLog = onBootLog;
   }
 
   push(chunk) {
@@ -95,10 +96,14 @@ export class OtaInput {
       const byte = await this.byte(Math.max(1, deadline - Date.now()));
       if (byte < 0) break;
       if (byte === 10) {
+        if (/^BOOT[12] (?:ERROR|INFO|DETAIL) /.test(line)) {
+          this.onBootLog(line);
+          if (line.startsWith("BOOT1 ERROR ")) throw new Error(line);
+        }
         if (line.startsWith("ERROR ")) throw new Error(line);
         if (accept(line)) return line;
         line = "";
-      } else if (byte !== 13 && line.length < 512) {
+      } else if (byte !== 0 && byte !== 13 && line.length < 512) {
         line += String.fromCharCode(byte);
       }
     }
