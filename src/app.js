@@ -1,6 +1,7 @@
 import { SerialClient } from "./serial-client.js";
 import { initI18n, t } from "./i18n.js";
 import { inspectMcuPackage, OtaInput, sendMcuPackage } from "./mcu-ota.js";
+import { extractReleaseApp } from "./release-hex.js";
 import {
   buildAtBytes, buildTextBytes, bytesToEscapedText, bytesToHex,
   extractJsonResponse, lineEndingValue, parseHex, safeCommandValue, ReadableSerialLog,
@@ -409,8 +410,10 @@ client.addEventListener("state", event => {
 
 async function upgradeMcu(recovery) {
   const file = byId("mcuOtaFile").files[0];
-  if (!file || file.size > 0x5c000) throw new Error("请选择有效的 MCU 签名包");
-  const image = new Uint8Array(await file.arrayBuffer());
+  const isHex = file?.name.toLowerCase().endsWith(".hex");
+  if (!file || file.size > (isHex ? 2 * 1024 * 1024 : 0x5c000))
+    throw new Error("请选择整机 HEX 或 App 签名 BIN");
+  const image = isHex ? extractReleaseApp(await file.text()) : new Uint8Array(await file.arrayBuffer());
   inspectMcuPackage(image);
   if (otaInput || pendingBaud || pendingMaintenance) throw new Error("串口有操作正在执行");
 

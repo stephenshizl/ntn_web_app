@@ -188,7 +188,8 @@
 
     <section class="panel span-2" aria-labelledby="otaTitle">
       <div class="panel-title"><h2 id="otaTitle">MCU 固件升级</h2></div>
-      <label>签名固件包<input id="mcuOtaFile" type="file" accept=".bin"></label>
+      <label>整机 HEX 或 App 签名 BIN<input id="mcuOtaFile" type="file" accept=".hex,.bin"></label>
+      <p class="hint">选择整机 HEX 时，网页会提取签名 App，通过 RS232 安装。BL1 和 BL2 由工装通过 SWD 烧录。</p>
       <div class="toolbar">
         <button id="mcuOtaStart" type="button" disabled>升级 MCU</button>
         <button id="mcuOtaRecovery" type="button" disabled>上电恢复</button>
