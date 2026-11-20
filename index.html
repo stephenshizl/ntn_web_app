@@ -186,6 +186,18 @@
       <button id="sendHexButton">发送HEX</button>
     </section>
 
+    <section class="panel span-2" aria-labelledby="otaTitle">
+      <div class="panel-title"><h2 id="otaTitle">MCU 固件升级</h2></div>
+      <label>签名固件包<input id="mcuOtaFile" type="file" accept=".bin"></label>
+      <div class="toolbar">
+        <button id="mcuOtaStart" type="button" disabled>升级 MCU</button>
+        <button id="mcuOtaRecovery" type="button" disabled>上电恢复</button>
+        <button id="mcuOtaCancel" type="button" disabled>取消传输</button>
+      </div>
+      <progress id="mcuOtaProgress" max="100" value="0" aria-label="固件传输进度"></progress>
+      <p id="mcuOtaStatus" role="status">连接串口后选择签名固件包。</p>
+    </section>
+
     <section class="panel span-2 log-panel">
       <div class="panel-title">
         <div><span class="step">06</span><h2>实时记录</h2></div>

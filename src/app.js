@@ -1,5 +1,6 @@
 import { SerialClient } from "./serial-client.js";
 import { initI18n, t } from "./i18n.js";
+import { inspectMcuPackage, OtaInput, sendMcuPackage } from "./mcu-ota.js";
 import {
   buildAtBytes, buildTextBytes, bytesToEscapedText, bytesToHex,
   extractJsonResponse, lineEndingValue, parseHex, safeCommandValue, ReadableSerialLog,
@@ -27,6 +28,9 @@ let transientMessageTimer = null;
 let btNamePoll=null;
 let lastRequestIsName=false;
 let btNamePollUntil=0;
+let otaInput = null;
+let otaCanCancel = false;
+let otaBinaryTransfer = false;
 
 function setBadge(element, text, kind = "") {
   element.textContent = t(text);
@@ -100,7 +104,10 @@ function setControls(connected) {
   byId("disconnectButton").disabled = !connected;
   byId("connectAuthorizedButton").disabled = connected || !SerialClient.isSupported();
   document.querySelectorAll("[data-at], form button, #sendTextButton, #sendHexButton, #enterMaintenanceButton, #exitMaintenanceButton, #changeBaudButton, #networkQueryButton, #simQueryButton")
-    .forEach(button => { button.disabled = !connected; });
+    .forEach(button => { button.disabled = !connected || Boolean(otaInput); });
+  byId("mcuOtaStart").disabled = !connected || Boolean(otaInput);
+  byId("mcuOtaRecovery").disabled = !connected || Boolean(otaInput);
+  byId("mcuOtaCancel").disabled = !otaCanCancel;
 }
 
 function clearPendingBaud() {
@@ -329,6 +336,7 @@ function consumeText(bytes) {
 }
 
 async function sendBytes(bytes, note = "") {
+  if (otaInput) throw new Error("MCU 升级正在使用串口");
   commandInFlight = true;
   try { await client.write(bytes); }
   catch (error) { commandInFlight = false; throw error; }
@@ -351,6 +359,10 @@ async function runAction(action, options = {}) {
 }
 
 client.addEventListener("rx", event => {
+  if (otaInput) {
+    otaInput.push(event.detail);
+    return;
+  }
   appendLog("RX", event.detail);
   consumeText(event.detail);
 });
@@ -388,11 +400,108 @@ client.addEventListener("state", event => {
       setConnectionMessage("串口已断开，可重新连接已授权串口。", "info");
     }
     if (state.unexpected) {
+      otaInput?.close();
       appendSystem("串口意外断开，请检查拔插状态");
       setConnectionMessage("串口意外断开，请检查 USB 连接和 USB 转 RS232 设备。", "error");
     }
   }
 });
+
+async function upgradeMcu(recovery) {
+  const file = byId("mcuOtaFile").files[0];
+  if (!file || file.size > 0x5c000) throw new Error("请选择有效的 MCU 签名包");
+  const image = new Uint8Array(await file.arrayBuffer());
+  inspectMcuPackage(image);
+  if (otaInput || pendingBaud || pendingMaintenance) throw new Error("串口有操作正在执行");
+
+  const progress = byId("mcuOtaProgress");
+  const status = byId("mcuOtaStatus");
+  const appBaud = client.baudRate;
+  const rawMode = effectiveMode === 1;
+  const encode = value => new TextEncoder().encode(value);
+  otaInput = new OtaInput();
+  otaCanCancel = true;
+  otaBinaryTransfer = false;
+  setControls(client.connected);
+  stopNetworkRefresh();
+  stopBtNamePoll();
+  resetQuery();
+  progress.value = 0;
+  try {
+    if (!recovery) {
+      status.textContent = "读取设备升级能力";
+      await client.write(buildAtBytes("AT+MCUCAP?"));
+      const line = await otaInput.line(3000, value => value.startsWith("+MCUCAP:"));
+      if (!extractJsonResponse(line, "+MCUCAP")?.upgrade) {
+        throw new Error("设备未报告升级能力。模式 1 请先进入维护，或使用上电恢复。");
+      }
+      await client.write(buildAtBytes("AT+MCUOTA=BOOT"));
+      await otaInput.line(3000, value => value.startsWith("+MCUOTA:"));
+    }
+    if (client.baudRate !== 19200) await client.reopen(19200);
+    status.textContent = recovery ? "请重新给设备上电" : "等待引导程序";
+    const deadline = Date.now() + (recovery ? 20000 : 7000);
+    let ready;
+    while (!ready && Date.now() < deadline) {
+      await client.write(encode("NTN-MCU-OTA/1 HELLO\r\n"));
+      try { ready = await otaInput.line(400, value => value.startsWith("READY ")); }
+      catch (error) {
+        if (otaInput.closed || error.message !== "等待设备响应超时") throw error;
+      }
+    }
+    if (!ready) throw new Error("设备引导程序未响应");
+    status.textContent = "正在准备片外下载区";
+    const { build } = await sendMcuPackage(client, otaInput, image, ready, (sent, total) => {
+      progress.value = sent * 100 / total;
+      status.textContent = `已传输 ${sent} / ${total} B`;
+      if (sent === total) {
+        otaCanCancel = false;
+        setControls(client.connected);
+      }
+    }, () => { otaBinaryTransfer = true; });
+    status.textContent = "设备已验签，等待安装和试运行";
+    if (client.baudRate !== appBaud) await client.reopen(appBaud);
+    const confirmDeadline = Date.now() + 180000;
+    while (Date.now() < confirmDeadline) {
+      if (rawMode) {
+        await otaInput.line(10000, line => line.startsWith("[BOOT]")).catch(error => {
+          if (otaInput.closed || error.message !== "等待设备响应超时") throw error;
+        });
+        if (await client.waitForSilence(1100, 5000)) {
+          await client.write(encode("+++"));
+          if (await client.waitForSilence(1100, 5000)) {
+            await client.write(buildAtBytes("AT+MCUCFG=1"));
+          }
+        }
+      }
+      await client.write(buildAtBytes("AT+MCUOTASTAT?"));
+      let reply;
+      try { reply = await otaInput.line(3000, value => value.startsWith("+MCUOTASTAT:")); }
+      catch (error) {
+        if (otaInput.closed || error.message !== "等待设备响应超时") throw error;
+        continue;
+      }
+      const installed = extractJsonResponse(reply, "+MCUOTASTAT");
+      if (installed?.confirmed === true && installed.build === build) {
+        status.textContent = `已确认固件 ${build}`;
+        return;
+      }
+      await new Promise(resolve => setTimeout(resolve, 2000));
+    }
+    throw new Error("设备已验签，尚未确认目标构建。请重新连接查询设备状态。");
+  } catch (error) {
+    status.textContent = error.message;
+    throw error;
+  } finally {
+    otaInput.close();
+    otaInput = null;
+    otaCanCancel = false;
+    otaBinaryTransfer = false;
+    commandInFlight = false;
+    textStream = "";
+    setControls(client.connected);
+  }
+}
 
 async function performBaudSwitch(newBaud) {
   baudSwitching = true;
@@ -443,6 +552,13 @@ function bindForm(id, builder) {
 }
 
 function init() {
+  byId("mcuOtaStart").addEventListener("click", () => runAction(() => upgradeMcu(false)));
+  byId("mcuOtaRecovery").addEventListener("click", () => runAction(() => upgradeMcu(true)));
+  byId("mcuOtaCancel").addEventListener("click", () => runAction(async () => {
+    if (!otaCanCancel || !otaInput) return;
+    otaInput.close();
+    if (client.connected && otaBinaryTransfer) await client.write(Uint8Array.of(24, 24));
+  }));
   byId("userGuideButton").addEventListener("click", () => byId("userGuideDialog").showModal());
   byId("userGuideClose").addEventListener("click", () => byId("userGuideDialog").close());
   initI18n();
