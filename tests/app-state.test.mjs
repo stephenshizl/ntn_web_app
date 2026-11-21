@@ -221,21 +221,25 @@ test('default log combines RX fragments while raw TXT/HEX preserves original chu
   assert.equal(a.element('serialLog').textContent.split('\n').length,1);
 });
 
-test('new modem queries cannot write data in unknown mode or RAW mode',async()=>{
-  const a=await app();await a.click('networkQueryButton');await a.click('simQueryButton');
-  assert.deepEqual(a.client.writes,[]);
-  await a.rx('+MCUSTAT:{"mode":1}\r\nOK\r\n');
-  await a.click('networkQueryButton');assert.deepEqual(a.client.writes,[]);
+test('modem queries discover mode automatically and reject RAW mode',async()=>{
+  const a=await app();
+  await a.click('simQueryButton');
+  assert.deepEqual(a.client.writes,['AT+MCUSTAT?\r\n']);
   await a.rx('+MCUSTAT:{"mode":0}\r\nOK\r\n');
+  assert.equal(a.client.writes.at(-1),'AT+CPIN?\r\n');
+  await a.rx('+CPIN:SIM PIN\r\nOK\r\n');
+  assert.equal(a.element('simValue').textContent,'已插卡，需要PIN');
+
   await a.click('networkQueryButton');
   assert.equal(a.client.writes.at(-1),'AT+CEREG?\r\n');
   await a.rx('AT+CEREG?\r+CEREG:1,5\r\nOK\r\n');
   assert.equal(a.element('networkValue').textContent,'已入网（漫游）');
-  await a.click('simQueryButton');await a.rx('+CPIN:SIM PIN\r\nOK\r\n');
-  assert.equal(a.element('simValue').textContent,'已插卡，需要PIN');
   await a.click('simQueryButton');await a.rx('+CME ERROR: 13\r\n');
   assert.equal(a.element('simValue').textContent,'查询失败，状态未知');
   assert.match(a.element('queryMessage').textContent,/设备返回错误/);
+
+  const b=await app();await b.rx('+MCUSTAT:{"mode":1}\r\nOK\r\n');
+  await b.click('networkQueryButton');assert.deepEqual(b.client.writes,[]);
 });
 
 test('network auto refresh is opt-in, runs at 5 seconds and pauses while hidden or busy',async()=>{

@@ -1,8 +1,9 @@
 const zhToEn = {
   "查询NTN入网": "Query NTN registration", "查询SIM状态": "Query SIM status", "网络状态每5秒更新": "Refresh network every 5 seconds",
   "NTN入网查询": "NTN registration query", "SIM状态查询": "SIM status query",
-  "仅在已确认的模式0下查询；请先查询运行状态。模式1请使用蓝牙App。NOT READY不能单独证明未插卡。": "Query only after Mode 0 is confirmed by Runtime status. Use the Bluetooth app in Mode 1. NOT READY alone does not prove the SIM is absent.",
+  "模式未知时网页会先自动查询运行状态；模式0下继续查询，模式1请使用蓝牙App。NOT READY不能单独证明未插卡。": "When the mode is unknown, the page queries Runtime status first. It continues in Mode 0; use the Bluetooth app in Mode 1. NOT READY alone does not prove the SIM is absent.",
   "请先在模式0下查询运行状态；模式1请使用蓝牙App": "First query Runtime status in Mode 0; use the Bluetooth app in Mode 1",
+  "当前为模式1，请使用蓝牙App查询NTN和SIM状态": "The device is in Mode 1; use the Bluetooth app to query NTN and SIM status",
   "当前通道忙，请稍后查询": "Channel busy; query again later", "查询失败，状态未知": "Query failed; status unknown",
   "未入网": "Not registered", "已入网（本地）": "Registered (home)", "入网被拒": "Registration denied", "入网状态未知": "Registration unknown", "已入网（漫游）": "Registered (roaming)",
   "已插卡，SIM就绪": "SIM inserted and ready", "已插卡，需要PIN": "SIM inserted; PIN required", "已插卡，需要PUK": "SIM inserted; PUK required",

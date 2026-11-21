@@ -17,6 +17,7 @@ let textStream = "";
 let pendingQuery = null;
 let queryTimer = null;
 let effectiveMode = null;
+let pendingModemAfterMode = null;
 let networkRefreshTimer = null;
 let commandInFlight = false;
 let pendingMaintenance = null;
@@ -147,6 +148,7 @@ function resetQuery(message = "点击快捷查询查看设备应答") {
 
 function resetTelemetry() {
   effectiveMode = null;
+  pendingModemAfterMode = null;
   stopNetworkRefresh();
   for (const id of ["firmwareValue", "hardwareValue", "buildValue", "modeValue", "ntnValue",
     "socketValue", "flashValue", "gnssValue", "errorValue", "timeValue", "rxModeValue", "networkValue", "simValue"]) {
@@ -162,6 +164,7 @@ async function queryAt(command) {
   byId("queryMessage").textContent = `${command} · ${t("等待设备应答")}`;
   byId("queryMessage").className = "";
   queryTimer = setTimeout(() => {
+    if (pendingQuery?.command === "AT+MCUSTAT?") pendingModemAfterMode = null;
     if (pendingQuery) finishModemStatus(pendingQuery, false);
     pendingQuery = null;
     queryTimer = null;
@@ -186,10 +189,30 @@ function finishModemStatus(query, ok) {
 }
 
 async function queryModemStatus(sim = false) {
-  if (effectiveMode !== 0) throw new Error("请先在模式0下查询运行状态；模式1请使用蓝牙App");
   if (pendingMaintenance || pendingBaud || baudSwitching || commandInFlight || pendingQuery) throw new Error("当前通道忙，请稍后查询");
   byId(sim ? "simValue" : "networkValue").textContent = t("等待设备应答");
+  if (effectiveMode === null) {
+    pendingModemAfterMode = sim;
+    await queryAt("AT+MCUSTAT?");
+    return;
+  }
+  if (effectiveMode !== 0) throw new Error("当前为模式1，请使用蓝牙App查询NTN和SIM状态");
   await queryAt(sim ? "AT+CPIN?" : "AT+CEREG?");
+}
+
+function continueModemQueryAfterMode(command, ok) {
+  if (command !== "AT+MCUSTAT?" || pendingModemAfterMode === null) return;
+  const sim = pendingModemAfterMode;
+  pendingModemAfterMode = null;
+  if (!ok || effectiveMode === null) {
+    byId(sim ? "simValue" : "networkValue").textContent = t("查询失败，状态未知");
+    return;
+  }
+  if (effectiveMode !== 0) {
+    showTransientActionError(new Error("当前为模式1，请使用蓝牙App查询NTN和SIM状态"));
+    return;
+  }
+  void runAction(() => queryModemStatus(sim));
 }
 
 function stopNetworkRefresh() {
@@ -209,6 +232,8 @@ function updateQueryResponse(line) {
   } else if (!/^(ERROR|\+CME ERROR:.*|\+CMS ERROR:.*)$/.test(line) && !(line === "OK" && pendingQuery.matched)) {
     return;
   } else {
+    const completedCommand = pendingQuery.command;
+    const completedOk = line === "OK";
     finishModemStatus(pendingQuery, line === "OK");
     pendingQuery.lines.push(line);
     byId("queryMessage").textContent = `${pendingQuery.command} · ${t(line === "OK" ? "查询成功" : "设备返回错误")}`;
@@ -218,6 +243,7 @@ function updateQueryResponse(line) {
     const lines = pendingQuery.lines;
     pendingQuery = null;
     byId("queryResponse").textContent = lines.join("\n");
+    continueModemQueryAfterMode(completedCommand, completedOk);
     return;
   }
   byId("queryResponse").textContent = pendingQuery.lines.join("\n");
@@ -658,8 +684,10 @@ function init() {
     const enabled = byId("networkAutoRefresh").checked;
     stopNetworkRefresh();
     if (!enabled) return;
-    if (!client.connected || effectiveMode !== 0) {
-      showTransientActionError(new Error("请先在模式0下查询运行状态；模式1请使用蓝牙App"));
+    if (!client.connected || effectiveMode === 1) {
+      showTransientActionError(new Error(effectiveMode === 1
+        ? "当前为模式1，请使用蓝牙App查询NTN和SIM状态"
+        : "请先连接串口"));
       return;
     }
     byId("networkAutoRefresh").checked = true;

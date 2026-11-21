@@ -95,7 +95,7 @@
         <button id="simQueryButton">查询SIM状态</button>
         <label class="inline-check"><input id="networkAutoRefresh" type="checkbox">网络状态每5秒更新</label>
       </div>
-      <p class="hint">仅在已确认的模式0下查询；请先查询运行状态。模式1请使用蓝牙App。NOT READY不能单独证明未插卡。</p>
+      <p class="hint">模式未知时网页会先自动查询运行状态；模式0下继续查询，模式1请使用蓝牙App。NOT READY不能单独证明未插卡。</p>
       <div class="telemetry-grid">
         <article><span>NTN入网查询</span><strong id="networkValue">—</strong></article>
         <article><span>SIM状态查询</span><strong id="simValue">—</strong></article>
@@ -175,19 +175,8 @@
       </div>
     </section>
 
-    <section class="panel">
-      <div class="panel-title"><div><span class="step">05</span><h2>串口终端</h2></div></div>
-      <label>AT/文本命令<textarea id="textInput" rows="3" placeholder="AT+MCUSTAT?"></textarea></label>
-      <div class="toolbar">
-        <label>行尾<select id="lineEnding"><option value="crlf">CRLF</option><option value="cr">CR</option><option value="lf">LF</option><option value="none">无</option></select></label>
-        <button id="sendTextButton" class="primary">发送文本</button>
-      </div>
-      <label>原始HEX<textarea id="hexInput" rows="3" placeholder="00 FF 0D 0A"></textarea></label>
-      <button id="sendHexButton">发送HEX</button>
-    </section>
-
-    <section class="panel span-2" aria-labelledby="otaTitle">
-      <div class="panel-title"><h2 id="otaTitle">MCU 固件升级</h2></div>
+    <section class="panel" aria-labelledby="otaTitle">
+      <div class="panel-title"><div><span class="step">05</span><h2 id="otaTitle">MCU 固件升级</h2></div></div>
       <label>整机 HEX 或 App 签名 BIN<input id="mcuOtaFile" type="file" accept=".hex,.bin"></label>
       <p class="hint">选择整机 HEX 时，网页会提取签名 App，通过 RS232 安装。BL1 和 BL2 由工装通过 SWD 烧录。</p>
       <div class="toolbar">
@@ -199,9 +188,20 @@
       <p id="mcuOtaStatus" role="status">连接串口后选择签名固件包。</p>
     </section>
 
-    <section class="panel span-2 log-panel">
+    <section class="panel terminal-panel">
+      <div class="panel-title"><div><span class="step">06</span><h2>串口终端</h2></div></div>
+      <label>AT/文本命令<textarea id="textInput" rows="3" placeholder="AT+MCUSTAT?"></textarea></label>
+      <div class="toolbar">
+        <label>行尾<select id="lineEnding"><option value="crlf">CRLF</option><option value="cr">CR</option><option value="lf">LF</option><option value="none">无</option></select></label>
+        <button id="sendTextButton" class="primary">发送文本</button>
+      </div>
+      <label>原始HEX<textarea id="hexInput" rows="3" placeholder="00 FF 0D 0A"></textarea></label>
+      <button id="sendHexButton">发送HEX</button>
+    </section>
+
+    <section class="panel log-panel">
       <div class="panel-title">
-        <div><span class="step">06</span><h2>实时记录</h2></div>
+        <div><span class="step">07</span><h2>实时记录</h2></div>
         <div class="toolbar compact">
           <label>显示方式<select id="logView"><option value="text">按行文本</option><option value="raw">原始TXT / HEX</option></select></label>
           <button id="clearLogButton" class="ghost">清空</button><button id="exportLogButton">导出日志</button>
