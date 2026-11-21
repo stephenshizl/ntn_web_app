@@ -455,11 +455,17 @@ async function upgradeMcu(recovery) {
         return null;
       });
       previousBuild = prevLine ? (extractJsonResponse(prevLine, "+MCUOTASTAT")?.build ?? null) : null;
+      status.textContent = "业务 App 正在切换至升级引导程序";
       await client.write(buildAtBytes("AT+MCUOTA=BOOT"));
-      await otaInput.line(3000, value => value.startsWith("+MCUOTA:"));
+      try {
+        await otaInput.line(3000, value => value.startsWith("+MCUOTA:"));
+      } catch (error) {
+        if (otaInput.closed || error.message !== "等待设备响应超时") throw error;
+        throw new Error("业务 App 未确认升级重启命令（AT+MCUOTA=BOOT）。请检查当前业务串口波特率和 App 是否为已确认状态。");
+      }
     }
     if (client.baudRate !== 19200) await reopenOtaBaud(19200);
-    status.textContent = recovery ? "请重新给设备上电" : "等待引导程序";
+    status.textContent = recovery ? "请重新给设备上电" : "App 已确认重启，等待 BL2 引导程序（19200 bps）";
     const deadline = Date.now() + (recovery ? 20000 : 7000);
     let ready;
     while (!ready && Date.now() < deadline) {
@@ -469,7 +475,10 @@ async function upgradeMcu(recovery) {
         if (otaInput.closed || error.message !== "等待设备响应超时") throw error;
       }
     }
-    if (!ready) throw new Error("设备引导程序未响应");
+    if (!ready) {
+      if (recovery) throw new Error("上电后 20 秒内未收到 BL2 引导程序 READY。请检查 RS232 接线和 19200 bps 设置。");
+      throw new Error("BL2 未进入串口升级态：业务 App 已确认重启，但 7 秒内未收到 READY。请点击“上电恢复”后断电重上电；若仍失败，请用 J-Link 全量烧录 ntn-ota-l0.hex。");
+    }
     status.textContent = "正在准备片外下载区";
     const { build } = await sendMcuPackage(client, otaInput, image, ready, (sent, total) => {
       progress.value = sent * 100 / total;
@@ -530,6 +539,16 @@ async function upgradeMcu(recovery) {
       if (installed?.confirmed === true) lastConfirmedBuild = installed.build;
       if (installed?.confirmed === true && installed.build === build &&
           (previousBuild !== build || sawTargetTrial)) {
+        /* A confirmed MCUboot trailer proves the image accepted itself, but not
+         * that the business-side PC command router is live.  Probe it before
+         * declaring success.  The one-shot [BOOT] banner may have been emitted
+         * while Web Serial was reopening from BL2's 19200 bps channel. */
+        status.textContent = `固件 ${build} 已确认，正在检查业务 App`;
+        await client.write(buildAtBytes("AT+MCUCAP?"));
+        const capLine = await otaInput.line(3000, value => value.startsWith("+MCUCAP:"));
+        if (!extractJsonResponse(capLine, "+MCUCAP"))
+          throw new Error("镜像已确认，但业务 App 启动确认失败。请重新连接后查询设备状态。");
+        appendSystem(`APP_READY build=${build}（业务 App 已响应；若未显示 [BOOT]，该一次性日志已在串口切换期间发出）`);
         status.textContent = `已确认固件 ${build}`;
         return;
       }
