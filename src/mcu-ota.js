@@ -103,8 +103,9 @@ export class OtaInput {
         if (line.startsWith("ERROR ")) throw new Error(line);
         if (accept(line)) return line;
         line = "";
-      } else if (byte !== 0 && byte !== 13 && line.length < 512) {
-        line += String.fromCharCode(byte);
+      } else if (byte !== 13 && line.length < 512) {
+        if (!line.length && (byte < 0x20 || byte > 0x7e)) continue;
+        if (byte !== 0) line += String.fromCharCode(byte);
       }
     }
     throw new Error("等待设备响应超时");
@@ -116,7 +117,13 @@ async function expectByte(input, expected, timeout) {
   while (Date.now() < deadline) {
     const byte = await input.byte(Math.max(1, deadline - Date.now()));
     if (byte === expected) return true;
-    if (byte === CAN) throw new Error("设备取消了 YMODEM 传输");
+    if (byte === CAN) {
+      const next = await input.byte(Math.min(1000, Math.max(1, deadline - Date.now())));
+      if (next === CAN) throw new Error("设备取消了 YMODEM 传输");
+      if (next === expected) return true;
+      if (next === NAK) return false;
+      continue;
+    }
     if (byte === -1 || byte === NAK) return false;
   }
   return false;

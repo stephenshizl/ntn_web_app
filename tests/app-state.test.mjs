@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import vm from 'node:vm';
 import * as protocol from '../src/protocol.js';
+import * as mcuOta from '../src/mcu-ota.js';
+import { extractReleaseApp } from '../src/release-hex.js';
 
 async function app(supported=true) {
   const elements=new Map();
@@ -15,14 +17,16 @@ async function app(supported=true) {
   };
   let client;
   class FakeSerialClient extends EventTarget {
-    constructor(){super();client=this;this.connected=true;this.baudRate=19200;this.writes=[];}
+    constructor(){super();client=this;this.connected=true;this.baudRate=19200;this.writes=[];this.rawWrites=[];this.reopens=[];}
     static isSupported(){return supported;}
-    async write(bytes){this.writes.push(new TextDecoder().decode(bytes));}
+    async write(bytes){this.rawWrites.push(bytes);this.writes.push(new TextDecoder().decode(bytes));this.onWrite?.(bytes);}
+    async reopen(baud){this.reopens.push(baud);this.connected=false;this.emit('state',{connected:false});this.baudRate=baud;this.connected=true;this.emit('state',{connected:true,baudRate:baud});}
+    async disconnect(){this.connected=false;this.emit('state',{connected:false});}
     async waitForSilence(){return true;}
     emit(name,detail){this.dispatchEvent(new CustomEvent(name,{detail}));}
   }
   const timers=new Map();let nextTimer=1;
-  const context={...protocol, SerialClient:FakeSerialClient,initI18n(){},t:s=>s,TextDecoder,TextEncoder,CustomEvent,
+  const context={...protocol,...mcuOta,extractReleaseApp,SerialClient:FakeSerialClient,initI18n(){},t:s=>s,TextDecoder,TextEncoder,CustomEvent,Uint8Array,DataView,Date,
     document:{getElementById:element,querySelectorAll:()=>[]},navigator:supported?{serial:{addEventListener(){}}}:{},
     localStorage:{getItem(){return null;},setItem(){}},
     FormData:class {constructor(form){this.form=form;}get(name){return this.form.fields?.[name]??null;}},
@@ -255,4 +259,142 @@ test('network auto refresh is opt-in, runs at 5 seconds and pauses while hidden 
   a.client.emit('state',{connected:false});
   assert.equal(a.element('networkValue').textContent,'—');
   assert.equal(a.element('simValue').textContent,'—');
+});
+
+function fakeOtaImage(buildByte) {
+  const data = new Uint8Array(3072);
+  const view = new DataView(data.buffer);
+  view.setUint32(0, 0x96f3b83d, true);
+  view.setUint16(8, 0x400, true);
+  view.setUint32(12, data.length - 0x480, true);
+  data.set(new TextEncoder().encode('NTHC'), 0x800);
+  view.setUint32(0x804, 0x00400001, true);
+  view.setUint32(0x808, 0x314e544e, true);
+  view.setUint32(0x80c, 1, true);
+  view.setUint32(0x818, 1, true);
+  data.fill(buildByte, 0x81c, 0x82c);
+  return { name: 'app.signed.bin', size: data.length, async arrayBuffer() { return data.buffer; } };
+}
+
+function attachFakeOtaDevice(a, { prevBuild, postReplies, rawMode = false }) {
+  const enc = new TextEncoder();
+  let phase = 'app';
+  let dataBlocks = 0;
+  let postIdx = 0;
+  let maintCount = 0;
+  a.client.onWrite = bytes => {
+    const text = new TextDecoder().decode(bytes);
+    const push = v => queueMicrotask(() => a.client.emit('rx', typeof v === 'string' ? enc.encode(v) : v));
+    if (text === 'AT+MCUCAP?\r\n') return push('+MCUCAP:{"upgrade":true}\r\nOK\r\n');
+    if (text === 'AT+MCUOTASTAT?\r\n') {
+      if (phase === 'app') return push(`+MCUOTASTAT:{"build":"${prevBuild}","confirmed":true}\r\nOK\r\n`);
+      const reply = postReplies[Math.min(postIdx++, postReplies.length - 1)];
+      return push(reply);
+    }
+    if (text === 'AT+MCUOTA=BOOT\r\n') { phase = 'boot'; return push('+MCUOTA:{"state":"REBOOTING"}\r\nOK\r\n'); }
+    if (text === 'NTN-MCU-OTA/1 HELLO\r\n') return push('READY 1 1 376832\r\n');
+    if (text.startsWith('BEGIN ')) { phase = 'ymodem_blk0'; return push('RX 1\r\nC'); }
+    if (phase === 'ymodem_blk0' && bytes[0] === 1 && bytes[1] === 0) { phase = 'ymodem_data'; return push(Uint8Array.of(6, 67)); }
+    if (phase === 'ymodem_data' && bytes[0] === 2) { dataBlocks++; return push(Uint8Array.of(6)); }
+    if (phase === 'ymodem_data' && bytes.length === 1 && bytes[0] === 4) { phase = 'ymodem_eot2'; return push(Uint8Array.of(21)); }
+    if (phase === 'ymodem_eot2' && bytes.length === 1 && bytes[0] === 4) { phase = 'ymodem_end'; return push(Uint8Array.of(6, 67)); }
+    if (phase === 'ymodem_end' && bytes[0] === 1) {
+      phase = 'post';
+      push(Uint8Array.of(6));
+      push('VERIFIED 1\r\n');
+      if (rawMode) push('[BOOT] NTN-Terminal started\r\n');
+      return;
+    }
+    if (text === '+++') { maintCount++; return; }
+    if (text === 'AT+MCUCFG=1\r\n') return push('+MCUAPPLY:{"pc_config":true}\r\nOK\r\n');
+  };
+  return { getMaintCount: () => maintCount, getDataBlocks: () => dataBlocks };
+}
+
+const drain = async (rounds = 6) => {
+  for (let r = 0; r < rounds; r++) {
+    await new Promise(resolve => setImmediate(resolve));
+  }
+};
+
+test('manual disconnect during OTA immediately aborts while intentional baud reopen succeeds', async () => {
+  const a = await app();
+  a.element('mcuOtaFile').files = [fakeOtaImage(0xb2)];
+  // Part 1: manual disconnect during AT+MCUCAP? wait wakes immediately
+  a.client.onWrite = () => {};
+  a.element('mcuOtaStart').handlers.click();
+  await drain();
+  a.client.emit('state', { connected: false });
+  await drain();
+  assert.match(a.element('mcuOtaStatus').textContent, /串口已关闭/);
+
+  // Part 2: intentional 115200 -> 19200 -> 115200 reopen completes end-to-end
+  a.client.connected = true;
+  a.client.baudRate = 115200;
+  const newBuild = 'b2'.repeat(16);
+  const oldBuild = 'a1'.repeat(16);
+  attachFakeOtaDevice(a, {
+    prevBuild: oldBuild,
+    postReplies: [`+MCUOTASTAT:{"build":"${newBuild}","confirmed":true}\r\nOK\r\n`]
+  });
+  a.element('mcuOtaStart').handlers.click();
+  await drain(12);
+  assert.deepEqual(a.client.reopens, [19200, 115200]);
+  assert.equal(a.element('mcuOtaStatus').textContent, `已确认固件 ${newBuild}`);
+});
+
+test('rollback to previous confirmed build is detected immediately and same-build still confirms', async () => {
+  // Case 1: rollback detected immediately after seeing trial/boot
+  const a = await app();
+  const oldBuild = 'a1'.repeat(16);
+  a.element('mcuOtaFile').files = [fakeOtaImage(0xb2)];
+  attachFakeOtaDevice(a, {
+    prevBuild: oldBuild,
+    postReplies: [
+      `+MCUOTASTAT:{"build":"${'b2'.repeat(16)}","confirmed":false}\r\nOK\r\n`,
+      `+MCUOTASTAT:{"build":"${oldBuild}","confirmed":true}\r\nOK\r\n`
+    ]
+  });
+  a.element('mcuOtaStart').handlers.click();
+  await drain(12);
+  // Fire the 2000ms poll delay timer once
+  const pollTimer = [...a.timers.values()].find(t => t.ms === 2000);
+  assert.ok(pollTimer);
+  pollTimer.fn();
+  await drain(12);
+  assert.match(a.element('mcuOtaStatus').textContent, new RegExp(`已回滚至旧版本 ${oldBuild}`));
+
+  // Case 2: same-build upgrade confirms without false rollback
+  const b = await app();
+  b.element('mcuOtaFile').files = [fakeOtaImage(0xa1)];
+  attachFakeOtaDevice(b, {
+    prevBuild: oldBuild,
+    postReplies: [`+MCUOTASTAT:{"build":"${oldBuild}","confirmed":true}\r\nOK\r\n`]
+  });
+  b.element('mcuOtaStart').handlers.click();
+  await drain(12);
+  assert.equal(b.element('mcuOtaStatus').textContent, `已确认固件 ${oldBuild}`);
+});
+
+test('RAW mode post-upgrade confirmation enters +++ maintenance only once across multiple polls', async () => {
+  const a = await app();
+  await a.rx('+MCUSTAT:{"mode":1}\r\nOK\r\n');
+  const newBuild = 'c3'.repeat(16);
+  a.element('mcuOtaFile').files = [fakeOtaImage(0xc3)];
+  const dev = attachFakeOtaDevice(a, {
+    prevBuild: 'a1'.repeat(16),
+    rawMode: true,
+    postReplies: [
+      `+MCUOTASTAT:{"build":"${newBuild}","confirmed":false}\r\nOK\r\n`,
+      `+MCUOTASTAT:{"build":"${newBuild}","confirmed":true}\r\nOK\r\n`
+    ]
+  });
+  a.element('mcuOtaStart').handlers.click();
+  await drain(12);
+  const pollTimer = [...a.timers.values()].find(t => t.ms === 2000);
+  assert.ok(pollTimer);
+  pollTimer.fn();
+  await drain(12);
+  assert.equal(dev.getMaintCount(), 1);
+  assert.equal(a.element('mcuOtaStatus').textContent, `已确认固件 ${newBuild}`);
 });

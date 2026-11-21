@@ -32,6 +32,7 @@ let btNamePollUntil=0;
 let otaInput = null;
 let otaCanCancel = false;
 let otaBinaryTransfer = false;
+let otaReopening = false;
 
 function setBadge(element, text, kind = "") {
   element.textContent = t(text);
@@ -398,6 +399,7 @@ client.addEventListener("state", event => {
     setBadge(byId("maintenanceBadge"), "维护状态未知");
     setBadge(byId("connectionBadge"), "串口未连接");
     if (!state.unexpected) {
+      if (!otaReopening) otaInput?.close();
       setConnectionMessage("串口已断开，可重新连接已授权串口。", "info");
     }
     if (state.unexpected) {
@@ -430,6 +432,15 @@ async function upgradeMcu(recovery) {
   stopBtNamePoll();
   resetQuery();
   progress.value = 0;
+  async function reopenOtaBaud(baud) {
+    otaReopening = true;
+    try {
+      await client.reopen(baud);
+    } finally {
+      otaReopening = false;
+    }
+  }
+  let previousBuild = null;
   try {
     if (!recovery) {
       status.textContent = "读取设备升级能力";
@@ -438,10 +449,16 @@ async function upgradeMcu(recovery) {
       if (!extractJsonResponse(line, "+MCUCAP")?.upgrade) {
         throw new Error("设备未报告升级能力。模式 1 请先进入维护，或使用上电恢复。");
       }
+      await client.write(buildAtBytes("AT+MCUOTASTAT?"));
+      const prevLine = await otaInput.line(1500, value => value.startsWith("+MCUOTASTAT:")).catch(error => {
+        if (otaInput.closed || error.message !== "等待设备响应超时") throw error;
+        return null;
+      });
+      previousBuild = prevLine ? (extractJsonResponse(prevLine, "+MCUOTASTAT")?.build ?? null) : null;
       await client.write(buildAtBytes("AT+MCUOTA=BOOT"));
       await otaInput.line(3000, value => value.startsWith("+MCUOTA:"));
     }
-    if (client.baudRate !== 19200) await client.reopen(19200);
+    if (client.baudRate !== 19200) await reopenOtaBaud(19200);
     status.textContent = recovery ? "请重新给设备上电" : "等待引导程序";
     const deadline = Date.now() + (recovery ? 20000 : 7000);
     let ready;
@@ -463,31 +480,55 @@ async function upgradeMcu(recovery) {
       }
     }, () => { otaBinaryTransfer = true; });
     status.textContent = "设备已验签，等待安装和试运行";
-    if (client.baudRate !== appBaud) await client.reopen(appBaud);
+    const verifiedAt = Date.now();
+    if (client.baudRate !== appBaud) await reopenOtaBaud(appBaud);
     const confirmDeadline = Date.now() + 180000;
+    let rawMaintEntered = false;
+    let sawPostVerifyBoot = false;
     while (Date.now() < confirmDeadline) {
-      if (rawMode) {
-        await otaInput.line(10000, line => line.startsWith("[BOOT]")).catch(error => {
+      if (rawMode && !rawMaintEntered) {
+        await otaInput.line(15000, line => {
+          if (line.startsWith("[BOOT]")) { sawPostVerifyBoot = true; return true; }
+          return false;
+        }).catch(error => {
           if (otaInput.closed || error.message !== "等待设备响应超时") throw error;
         });
         if (await client.waitForSilence(1100, 5000)) {
           await client.write(encode("+++"));
           if (await client.waitForSilence(1100, 5000)) {
             await client.write(buildAtBytes("AT+MCUCFG=1"));
+            await otaInput.line(2000, line => line === "OK" || line.startsWith("+MCUAPPLY:")).catch(error => {
+              if (otaInput.closed || error.message !== "等待设备响应超时") throw error;
+            });
+            rawMaintEntered = true;
           }
         }
       }
       await client.write(buildAtBytes("AT+MCUOTASTAT?"));
       let reply;
-      try { reply = await otaInput.line(3000, value => value.startsWith("+MCUOTASTAT:")); }
-      catch (error) {
+      try {
+        reply = await otaInput.line(3000, value => {
+          if (value.startsWith("[BOOT]")) {
+            sawPostVerifyBoot = true;
+            if (rawMode) rawMaintEntered = false;
+            return false;
+          }
+          return value.startsWith("+MCUOTASTAT:");
+        });
+      } catch (error) {
         if (otaInput.closed || error.message !== "等待设备响应超时") throw error;
         continue;
       }
       const installed = extractJsonResponse(reply, "+MCUOTASTAT");
+      if (installed?.confirmed === false) sawPostVerifyBoot = true;
       if (installed?.confirmed === true && installed.build === build) {
         status.textContent = `已确认固件 ${build}`;
         return;
+      }
+      if (previousBuild && previousBuild !== build &&
+          (sawPostVerifyBoot || Date.now() - verifiedAt >= 5000) &&
+          installed?.confirmed === true && installed.build === previousBuild) {
+        throw new Error(`新固件未通过自检，设备已回滚至旧版本 ${previousBuild}`);
       }
       await new Promise(resolve => setTimeout(resolve, 2000));
     }
@@ -496,6 +537,7 @@ async function upgradeMcu(recovery) {
     status.textContent = error.message;
     throw error;
   } finally {
+    otaReopening = false;
     otaInput.close();
     otaInput = null;
     otaCanCancel = false;
