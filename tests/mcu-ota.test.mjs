@@ -177,3 +177,25 @@ test("closing OtaInput immediately wakes a waiting line reader", async () => {
   setTimeout(() => input.close(), 15);
   await assert.rejects(pending, /已关闭/);
 });
+
+test("incompatible boot generations are rejected before BEGIN", async () => {
+  const input = new OtaInput();
+  const writes = [];
+  const port = {write(bytes) { writes.push(bytes); }};
+  const img = sample();
+  await assert.rejects(sendMcuPackage(port, input, img, "READY 2 1 376832", () => {}), /不匹配/);
+  new DataView(img.buffer).setUint32(0x818, 2, true);
+  await assert.rejects(sendMcuPackage(port, input, img, "READY 1 1 376832", () => {}), /不匹配/);
+  assert.equal(writes.length, 0);
+});
+
+test("boot warnings and the device reason after binary cancellation are visible", async () => {
+  const log = [];
+  const input = new OtaInput(line => log.push(line));
+  const enc = new TextEncoder();
+  input.push(enc.encode("BOOT2 WARN TEST\r\nREADY\r\n"));
+  assert.equal(await input.line(100, line => line === "READY"), "READY");
+  assert.deepEqual(log, ["BOOT2 WARN TEST"]);
+  const port = {write() { input.push(enc.encode("RX 1\r\n\x18\x18ERROR LOW_POWER\r\n")); }};
+  await assert.rejects(sendMcuPackage(port, input, sample(), "READY 1 1 376832", () => {}), /LOW_POWER/);
+});

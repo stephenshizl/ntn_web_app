@@ -96,7 +96,7 @@ export class OtaInput {
       const byte = await this.byte(Math.max(1, deadline - Date.now()));
       if (byte < 0) break;
       if (byte === 10) {
-        if (/^BOOT[12] (?:ERROR|INFO|DETAIL) /.test(line)) {
+        if (/^BOOT[12] (?:ERROR|WARN|INFO|DETAIL) /.test(line)) {
           this.onBootLog(line);
           if (line.startsWith("BOOT1 ERROR ")) throw new Error(line);
         }
@@ -119,7 +119,15 @@ async function expectByte(input, expected, timeout) {
     if (byte === expected) return true;
     if (byte === CAN) {
       const next = await input.byte(Math.min(1000, Math.max(1, deadline - Date.now())));
-      if (next === CAN) throw new Error("设备取消了 YMODEM 传输");
+      if (next === CAN) {
+        // BL2 may append a device reason after the cancellation bytes.
+        try {
+          await input.line(200, () => false);
+        } catch (error) {
+          if (error.message !== "等待设备响应超时") throw error;
+        }
+        throw new Error("设备取消了 YMODEM 传输");
+      }
       if (next === expected) return true;
       if (next === NAK) return false;
       continue;
@@ -140,7 +148,7 @@ async function sendFrame(port, input, bytes) {
 export async function sendMcuPackage(port, input, image, readyLine, progress, onTransfer = () => {}) {
   const packageInfo = inspectMcuPackage(image);
   const parts = /^READY (\d+) (\d+) (\d+)$/.exec(readyLine);
-  if (!parts || Number(parts[1]) < packageInfo.bootAbi ||
+  if (!parts || Number(parts[1]) !== packageInfo.bootAbi ||
       Number(parts[2]) !== packageInfo.layout || image.length > Number(parts[3])) {
     throw new Error("Boot 版本、布局或固件长度不匹配");
   }

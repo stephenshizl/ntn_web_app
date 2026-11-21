@@ -369,10 +369,14 @@ test('rollback to previous confirmed build is detected immediately and same-buil
   b.element('mcuOtaFile').files = [fakeOtaImage(0xa1)];
   attachFakeOtaDevice(b, {
     prevBuild: oldBuild,
-    postReplies: [`+MCUOTASTAT:{"build":"${oldBuild}","confirmed":true}\r\nOK\r\n`]
+    postReplies: [`+MCUOTASTAT:{"build":"${oldBuild}","confirmed":false}\r\nOK\r\n`,
+      `+MCUOTASTAT:{"build":"${oldBuild}","confirmed":true}\r\nOK\r\n`]
   });
   b.element('mcuOtaStart').handlers.click();
   await drain(12);
+  const sameBuildPoll = [...b.timers.values()].find(t => t.ms === 2000);
+  assert.ok(sameBuildPoll);
+  sameBuildPoll.fn(); await drain(12);
   assert.equal(b.element('mcuOtaStatus').textContent, `已确认固件 ${oldBuild}`);
 });
 
@@ -397,4 +401,45 @@ test('RAW mode post-upgrade confirmation enters +++ maintenance only once across
   await drain(12);
   assert.equal(dev.getMaintCount(), 1);
   assert.equal(a.element('mcuOtaStatus').textContent, `已确认固件 ${newBuild}`);
+});
+
+test('an old confirmed reply and generic boot banner do not prove rollback', async () => {
+  const a = await app();
+  const old = 'a1'.repeat(16);
+  const target = 'c3'.repeat(16);
+  a.element('mcuOtaFile').files = [fakeOtaImage(0xc3)];
+  attachFakeOtaDevice(a, { prevBuild: old, postReplies: [
+    `[BOOT] startup\r\n+MCUOTASTAT:{"build":"${old}","confirmed":true}\r\n`,
+    `+MCUOTASTAT:{"build":"${target}","confirmed":true}\r\n`
+  ]});
+  a.element('mcuOtaStart').handlers.click(); await drain();
+  assert.doesNotMatch(a.element('mcuOtaStatus').textContent, /回滚/);
+  const poll = [...a.timers.values()].find(timer => timer.ms === 2000);
+  assert.ok(poll); poll.fn(); await drain();
+  assert.match(a.element('mcuOtaStatus').textContent, new RegExp(target));
+});
+
+test('RAW status polling waits for explicit maintenance entry', async () => {
+  const a = await app();
+  await a.rx('+MCUSTAT:{"mode":1}\r\nOK\r\n');
+  a.element('mcuOtaFile').files = [fakeOtaImage(0xc3)];
+  attachFakeOtaDevice(a, {prevBuild:'a1'.repeat(16),rawMode:true,postReplies:[]});
+  const original = a.client.onWrite;
+  let entering = false;
+  let queries = 0;
+  a.client.onWrite = bytes => {
+    const text = new TextDecoder().decode(bytes);
+    if (text === 'AT+MCUCFG=1\r\n') {
+      entering = true;
+      void a.rx('OK\r\n');
+      return;
+    }
+    if (entering && text === 'AT+MCUOTASTAT?\r\n') { queries++; return; }
+    original(bytes);
+  };
+  a.element('mcuOtaStart').handlers.click(); await drain();
+  await new Promise(resolve => setTimeout(resolve, 2150));
+  assert.ok(entering);
+  assert.equal(queries, 0);
+  await a.client.disconnect(); await drain();
 });

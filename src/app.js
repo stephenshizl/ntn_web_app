@@ -480,36 +480,42 @@ async function upgradeMcu(recovery) {
       }
     }, () => { otaBinaryTransfer = true; });
     status.textContent = "设备已验签，等待安装和试运行";
-    const verifiedAt = Date.now();
     if (client.baudRate !== appBaud) await reopenOtaBaud(appBaud);
     const confirmDeadline = Date.now() + 180000;
     let rawMaintEntered = false;
-    let sawPostVerifyBoot = false;
+    let sawTargetTrial = false;
+    let lastConfirmedBuild = null;
+    let maintenanceAttempts = 0;
     while (Date.now() < confirmDeadline) {
       if (rawMode && !rawMaintEntered) {
         await otaInput.line(15000, line => {
-          if (line.startsWith("[BOOT]")) { sawPostVerifyBoot = true; return true; }
+          if (line.startsWith("[BOOT]")) return true;
           return false;
         }).catch(error => {
           if (otaInput.closed || error.message !== "等待设备响应超时") throw error;
         });
+        if (++maintenanceAttempts > 3) throw new Error("RAW 维护入口未确认，请重新连接后查询升级状态。");
         if (await client.waitForSilence(1100, 5000)) {
           await client.write(encode("+++"));
           if (await client.waitForSilence(1100, 5000)) {
             await client.write(buildAtBytes("AT+MCUCFG=1"));
-            await otaInput.line(2000, line => line === "OK" || line.startsWith("+MCUAPPLY:")).catch(error => {
+            const reply = await otaInput.line(2000, line =>
+              line.startsWith("+MCUAPPLY:") && extractJsonResponse(line, "+MCUAPPLY")?.pc_config === true
+            ).catch(error => {
               if (otaInput.closed || error.message !== "等待设备响应超时") throw error;
+              return null;
             });
-            rawMaintEntered = true;
+            rawMaintEntered = reply !== null;
           }
         }
+        if (!rawMaintEntered) continue;
+        maintenanceAttempts = 0;
       }
       await client.write(buildAtBytes("AT+MCUOTASTAT?"));
       let reply;
       try {
         reply = await otaInput.line(3000, value => {
           if (value.startsWith("[BOOT]")) {
-            sawPostVerifyBoot = true;
             if (rawMode) rawMaintEntered = false;
             return false;
           }
@@ -520,17 +526,22 @@ async function upgradeMcu(recovery) {
         continue;
       }
       const installed = extractJsonResponse(reply, "+MCUOTASTAT");
-      if (installed?.confirmed === false) sawPostVerifyBoot = true;
-      if (installed?.confirmed === true && installed.build === build) {
+      if (installed?.confirmed === false && installed.build === build) sawTargetTrial = true;
+      if (installed?.confirmed === true) lastConfirmedBuild = installed.build;
+      if (installed?.confirmed === true && installed.build === build &&
+          (previousBuild !== build || sawTargetTrial)) {
         status.textContent = `已确认固件 ${build}`;
         return;
       }
       if (previousBuild && previousBuild !== build &&
-          (sawPostVerifyBoot || Date.now() - verifiedAt >= 5000) &&
+          sawTargetTrial &&
           installed?.confirmed === true && installed.build === previousBuild) {
-        throw new Error(`新固件未通过自检，设备已回滚至旧版本 ${previousBuild}`);
+        throw new Error(`试运行后设备已回滚至旧版本 ${previousBuild}`);
       }
       await new Promise(resolve => setTimeout(resolve, 2000));
+    }
+    if (lastConfirmedBuild) {
+      throw new Error(`当前已确认构建 ${lastConfirmedBuild}，本次安装结果未能确认。请查询设备启动记录。`);
     }
     throw new Error("设备已验签，尚未确认目标构建。请重新连接查询设备状态。");
   } catch (error) {
