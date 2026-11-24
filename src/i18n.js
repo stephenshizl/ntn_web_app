@@ -1,4 +1,6 @@
 const zhToEn = {
+  "配置已生效并保存至 Flash": "Settings applied and saved to flash",
+  "配置已临时生效，重启后失效": "Settings applied for this session only",
   "设备自检": "Device self-test", "运行设备自检": "Run device self-test", "尚未自检": "Self-test not run",
   "模式1请先进入维护，或用 Android App 自检。": "In Mode 1, enter maintenance first or use the Android app.",
   "自检未完成，请确认连接和固件支持": "Self-test incomplete; check the connection and firmware support",

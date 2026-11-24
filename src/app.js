@@ -151,6 +151,7 @@ function resetTelemetry() {
   pendingModemAfterMode = null;
   stopNetworkRefresh();
   renderSelfTest("尚未自检");
+  byId("configWriteStatus").hidden = true;
   for (const id of ["firmwareValue", "hardwareValue", "buildValue", "modeValue", "ntnValue",
     "socketValue", "flashValue", "gnssValue", "errorValue", "timeValue", "rxModeValue", "networkValue", "simValue"]) {
     byId(id).textContent = "—";
@@ -362,6 +363,17 @@ function processLine(rawLine) {
   if (identity) byId("btNameIdentity").textContent=`Terminal SN: ${identity.terminal_sn}\nModem SN: ${identity.modem_sn}\nIMEI: ${identity.imei}`;
   const pending = extractJsonResponse(line, "+MCUPENDING");
   const applied = extractJsonResponse(line, "+MCUAPPLY");
+  const baud = extractJsonResponse(line, "+MCURS232");
+  if (applied?.state === "APPLIED" && typeof applied.persisted === "boolean") {
+    const status = byId("configWriteStatus");
+    status.hidden = false;
+    setBadge(status, applied.persisted ? "配置已生效并保存至 Flash" : "配置已临时生效，重启后失效",
+      applied.persisted ? "ok" : "warn");
+  }
+  if ((applied?.state === "APPLIED" && applied.baud === client.baudRate && applied.persisted !== false)
+      || (baud && baud.effective_baud === client.baudRate && baud.persisted !== false)) {
+    localStorage.setItem("ntn.pc.baud", String(client.baudRate));
+  }
   if (pending?.action === "RS232_BAUD" && pending.baud === pendingBaud && !baudSwitching) {
     void performBaudSwitch(pendingBaud);
   }
@@ -668,7 +680,6 @@ async function performBaudSwitch(newBaud) {
     await new Promise(resolve => setTimeout(resolve, 80));
     await client.reopen(Number(newBaud));
     byId("baudSelect").value = String(newBaud);
-    localStorage.setItem("ntn.pc.baud", String(newBaud));
     await new Promise(resolve => setTimeout(resolve, 750));
     await sendAt("AT+MCURS232?");
   } catch (error) {

@@ -74,6 +74,17 @@ test('baud ERROR releases pending operation for retry',async()=>{
   assert.equal(a.client.writes.length,2);
 });
 
+test('configuration confirmation identifies settings that only apply until restart', async () => {
+  const a = await app();
+  await a.rx('+MCUAPPLY:{"state":"APPLIED","mode":1,"persisted":false}\r\nOK\r\n');
+  assert.match(a.element('configWriteStatus').textContent, /临时生效/);
+  assert.equal(a.element('configWriteStatus').hidden, false);
+  await a.rx('+MCUAPPLY:{"state":"APPLIED","mode":0,"persisted":true}\r\nOK\r\n');
+  assert.match(a.element('configWriteStatus').textContent, /保存至 Flash/);
+  await a.rx('[BOOT] NTN-Terminal started\r\n');
+  assert.equal(a.element('configWriteStatus').hidden, true);
+});
+
 test('unsupported browser keeps connection button disabled',async()=>{
   const a=await app(false);assert.equal(a.element('connectButton').disabled,true);
 });
