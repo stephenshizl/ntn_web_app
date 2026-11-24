@@ -150,6 +150,7 @@ function resetTelemetry() {
   effectiveMode = null;
   pendingModemAfterMode = null;
   stopNetworkRefresh();
+  renderSelfTest("尚未自检");
   for (const id of ["firmwareValue", "hardwareValue", "buildValue", "modeValue", "ntnValue",
     "socketValue", "flashValue", "gnssValue", "errorValue", "timeValue", "rxModeValue", "networkValue", "simValue"]) {
     byId(id).textContent = "—";
@@ -160,12 +161,13 @@ async function queryAt(command) {
   if (pendingQuery) throw new Error("请等待当前查询结束");
   const prefix = command.replace(/^AT/, "").replace(/\?$/, "");
   pendingQuery = { command, prefix: prefix === "+MCUQUEUE" ? "+MCUSTAT" : prefix, matched: false, lines: [] };
+  if (command === "AT+MCUSELFTEST?") renderSelfTest("等待设备应答");
   byId("queryResponse").textContent = "—";
   byId("queryMessage").textContent = `${command} · ${t("等待设备应答")}`;
   byId("queryMessage").className = "";
   queryTimer = setTimeout(() => {
     if (pendingQuery?.command === "AT+MCUSTAT?") pendingModemAfterMode = null;
-    if (pendingQuery) finishModemStatus(pendingQuery, false);
+    if (pendingQuery) finishQueryStatus(pendingQuery, false);
     pendingQuery = null;
     queryTimer = null;
     byId("queryMessage").textContent = t("查询超时：请检查波特率、连接和模式1维护状态");
@@ -174,13 +176,45 @@ async function queryAt(command) {
   try {
     await sendAt(command);
   } catch (error) {
-    if (pendingQuery) finishModemStatus(pendingQuery, false);
+    if (pendingQuery) finishQueryStatus(pendingQuery, false);
     resetQuery("查询发送失败");
     throw error;
   }
 }
 
-function finishModemStatus(query, ok) {
+function renderSelfTest(summary, items = [], sn = "") {
+  byId("selfTestSummary").textContent = sn ? `${t(summary)} · SN: ${sn}` : t(summary);
+  const list = byId("selfTestItems");
+  list.replaceChildren(...items.map(([label, value, fault]) => {
+    const item = document.createElement("li");
+    item.textContent = `${t(label)}：${t(value)}`;
+    item.classList.toggle("self-test-fault", fault);
+    return item;
+  }));
+  list.hidden = items.length === 0;
+}
+
+function finishQueryStatus(query, ok) {
+  if (query.command === "AT+MCUSELFTEST?") {
+    const value = ok ? query.data : null;
+    if (typeof value?.nor_ready !== "boolean" || typeof value.queue_ready !== "boolean") {
+      renderSelfTest("自检未完成，请确认连接和固件支持");
+      return;
+    }
+    if (value.nor_ready) byId("bootDiagnostic").hidden = true;
+    const fault = !value.nor_ready || !value.queue_ready;
+    const items = [
+      ["外置 NOR", value.nor_ready ? "可用" : "初始化或分区异常", !value.nor_ready],
+      ["离线存储", value.queue_ready ? "可用" : "不可用", !value.queue_ready],
+      ["配置", value.config_saved === true ? "已加载保存配置" : "未加载保存配置", false],
+      ["GNSS", value.gnss_valid === true ? "定位有效" : "未定位", false],
+      ["NTN 入网", registrationLabel(value.registered), false],
+    ];
+    if (Number.isInteger(value.ntn_error) && value.ntn_error !== 0)
+      items.push(["NTN 最近错误码", String(value.ntn_error), false]);
+    renderSelfTest(fault ? "检测到存储异常" : "存储检查通过", items, value.sn);
+    return;
+  }
   const network = query.command === "AT+CEREG?";
   if (!network && query.command !== "AT+CPIN?") return;
   const value = network ? parseRegistration(query.lines.join("\n")) : parseSimState(query.lines.join("\n"));
@@ -226,6 +260,7 @@ function updateQueryResponse(line) {
   if (line.startsWith(`${pendingQuery.prefix}:`)) {
     pendingQuery.matched = true;
     const data = extractJsonResponse(line, pendingQuery.prefix);
+    pendingQuery.data = data;
     pendingQuery.lines.push(data ? `${pendingQuery.prefix}:\n${JSON.stringify(data, null, 2)}` : line);
   } else if (/^\+MCUERROR:/.test(line)) {
     pendingQuery.lines.push(line);
@@ -234,7 +269,7 @@ function updateQueryResponse(line) {
   } else {
     const completedCommand = pendingQuery.command;
     const completedOk = line === "OK";
-    finishModemStatus(pendingQuery, line === "OK");
+    finishQueryStatus(pendingQuery, line === "OK");
     pendingQuery.lines.push(line);
     byId("queryMessage").textContent = `${pendingQuery.command} · ${t(line === "OK" ? "查询成功" : "设备返回错误")}`;
     byId("queryMessage").className = line === "OK" ? "" : "error";
@@ -293,9 +328,21 @@ function startBtNamePoll() {
     void runAction(() => sendAt("AT+MCUBTNAME?"));
   },2500);
 }
+function showBootDiagnostic(line) {
+  const bootDiagnostic = byId("bootDiagnostic");
+  if (line.includes("BOOT2 WARN NOR_INIT_FALLBACK_PRIMARY")) {
+    bootDiagnostic.textContent = t("外置 NOR 初始化失败，终端正尝试启动片内固件");
+    bootDiagnostic.hidden = false;
+  } else if (line.includes("BOOT2 ERROR NOR_INIT")) {
+    bootDiagnostic.textContent = t("外置 NOR 初始化失败，终端停在 BL2");
+    bootDiagnostic.hidden = false;
+  }
+}
+
 function processLine(rawLine) {
   const line = rawLine.trim();
   if (!line) return;
+  showBootDiagnostic(line);
   if (/^(OK|ERROR|\+CME ERROR:.*|\+CMS ERROR:.*)$/.test(line)) commandInFlight = false;
   if (line.includes("[BOOT] NTN-Terminal started")) {
     commandInFlight = false;
@@ -420,6 +467,7 @@ client.addEventListener("state", event => {
     textStream = "";
     resetQuery("串口已断开，请重新连接并查询");
     resetTelemetry();
+    byId("bootDiagnostic").hidden = true;
     decoder.decode();
     readableLog.endReceive();
     setBadge(byId("maintenanceBadge"), "维护状态未知");
@@ -450,7 +498,10 @@ async function upgradeMcu(recovery) {
   const appBaud = client.baudRate;
   const rawMode = effectiveMode === 1;
   const encode = value => new TextEncoder().encode(value);
-  otaInput = new OtaInput(line => appendSystem(line));
+  otaInput = new OtaInput(line => {
+    showBootDiagnostic(line);
+    appendSystem(line);
+  });
   otaCanCancel = true;
   otaBinaryTransfer = false;
   setControls(client.connected);
@@ -472,7 +523,11 @@ async function upgradeMcu(recovery) {
       status.textContent = "读取设备升级能力";
       await client.write(buildAtBytes("AT+MCUCAP?"));
       const line = await otaInput.line(3000, value => value.startsWith("+MCUCAP:"));
-      if (!extractJsonResponse(line, "+MCUCAP")?.upgrade) {
+      const capabilities = extractJsonResponse(line, "+MCUCAP");
+      if (capabilities?.ota_storage_ready === false) {
+        throw new Error("设备的外置 NOR 升级存储不可用，无法进行网页升级");
+      }
+      if (!capabilities?.upgrade) {
         throw new Error("设备未报告升级能力。模式 1 请先进入维护，或使用上电恢复。");
       }
       await client.write(buildAtBytes("AT+MCUOTASTAT?"));

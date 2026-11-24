@@ -60,6 +60,7 @@ button.ghost { background: transparent; }
 .query-result h3 { margin-bottom: 8px; }
 #queryMessage { margin: 0 0 10px; font-size: 13px; }
 #queryMessage.error { color: var(--danger); }
+#bootDiagnostic, .self-test-fault { color: var(--danger); font-weight: 600; }
 #queryResponse { margin: 0; max-height: 280px; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.6 Consolas, monospace; }
 .config-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .config-card { display: grid; align-content: start; gap: 11px; padding: 16px; border: 1px solid var(--line); border-radius: 14px; background: #fbfdfe; }

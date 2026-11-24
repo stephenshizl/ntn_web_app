@@ -101,6 +101,14 @@
         <article><span>SIM状态查询</span><strong id="simValue">—</strong></article>
       </div>
       <div class="query-result">
+        <h3>设备自检</h3>
+        <button data-at="AT+MCUSELFTEST?">运行设备自检</button>
+        <p class="hint">模式1请先进入维护，或用 Android App 自检。</p>
+        <p id="bootDiagnostic" role="status" hidden></p>
+        <p id="selfTestSummary" role="status">尚未自检</p>
+        <ul id="selfTestItems" hidden></ul>
+      </div>
+      <div class="query-result">
         <h3>查询结果</h3>
         <p id="queryMessage" role="status" aria-live="polite">点击快捷查询查看设备应答</p>
         <pre id="queryResponse">—</pre>

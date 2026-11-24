@@ -1,4 +1,13 @@
 const zhToEn = {
+  "设备自检": "Device self-test", "运行设备自检": "Run device self-test", "尚未自检": "Self-test not run",
+  "模式1请先进入维护，或用 Android App 自检。": "In Mode 1, enter maintenance first or use the Android app.",
+  "自检未完成，请确认连接和固件支持": "Self-test incomplete; check the connection and firmware support",
+  "外置 NOR": "External NOR", "离线存储": "Offline storage", "初始化或分区异常": "Initialization or partition fault",
+  "可用": "Available", "不可用": "Unavailable", "检测到存储异常": "Storage issue detected", "存储检查通过": "Storage checks passed",
+  "配置": "Configuration", "已加载保存配置": "Saved settings loaded", "未加载保存配置": "Saved settings not loaded",
+  "NTN 入网": "NTN registration", "NTN 最近错误码": "Last NTN error code",
+  "外置 NOR 初始化失败，终端正尝试启动片内固件": "External NOR failed to initialize; booting the on-chip application",
+  "外置 NOR 初始化失败，终端停在 BL2": "External NOR failed to initialize; terminal stopped in BL2",
   "查询NTN入网": "Query NTN registration", "查询SIM状态": "Query SIM status", "网络状态每5秒更新": "Refresh network every 5 seconds",
   "NTN入网查询": "NTN registration query", "SIM状态查询": "SIM status query",
   "模式未知时网页会先自动查询运行状态；模式0下继续查询，模式1请使用蓝牙App。NOT READY不能单独证明未插卡。": "When the mode is unknown, the page queries Runtime status first. It continues in Mode 0; use the Bluetooth app in Mode 1. NOT READY alone does not prove the SIM is absent.",

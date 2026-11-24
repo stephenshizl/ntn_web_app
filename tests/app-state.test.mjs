@@ -10,6 +10,7 @@ async function app(supported=true) {
   const elements=new Map();
   const element=id=>{
     if(!elements.has(id))elements.set(id,{id,value:id==='newBaudSelect'?'19200':'',textContent:'',className:'',disabled:false,
+      replaceChildren(...children){this.children=children;},
       showModal(){this.open=true;},close(){this.open=false;},
       options:['9600','19200','38400','57600','115200'].map(value=>({value})), handlers:{},
       addEventListener(name,fn){this.handlers[name]=fn;}});
@@ -27,7 +28,8 @@ async function app(supported=true) {
   }
   const timers=new Map();let nextTimer=1;
   const context={...protocol,...mcuOta,extractReleaseApp,SerialClient:FakeSerialClient,initI18n(){},t:s=>s,TextDecoder,TextEncoder,CustomEvent,Uint8Array,DataView,Date,
-    document:{getElementById:element,querySelectorAll:()=>[]},navigator:supported?{serial:{addEventListener(){}}}:{},
+    document:{getElementById:element,querySelectorAll:()=>[],
+      createElement:()=>({textContent:'',classList:{toggle(){}}})},navigator:supported?{serial:{addEventListener(){}}}:{},
     localStorage:{getItem(){return null;},setItem(){}},
     FormData:class {constructor(form){this.form=form;}get(name){return this.form.fields?.[name]??null;}},
     setInterval(fn,ms){const id=nextTimer++;timers.set(id,{fn,ms,interval:true});return id;},clearInterval(id){timers.delete(id);},
@@ -43,6 +45,21 @@ async function app(supported=true) {
     startNamePoll:()=>vm.runInNewContext('startBtNamePoll()',context),
     async submitName(value){element('btNameForm').fields={btName:value};element('btNameForm').handlers.submit({preventDefault(){},currentTarget:element('btNameForm')});await settle();}};
 }
+
+test('self-test associates faults with the responding terminal and clears the result on disconnect',async()=>{
+  const a=await app();
+  await a.rx('BOOT2 ERROR NOR_INIT\r\n');
+  assert.match(a.element('bootDiagnostic').textContent,/终端停在 BL2/);
+  await a.query('AT+MCUSELFTEST?');
+  await a.rx('OK\r\n');
+  assert.equal(a.element('selfTestSummary').textContent,'等待设备应答');
+  await a.rx('+MCUSELFTEST:{"sn":"TEST-01","nor_ready":false,"queue_ready":false,"config_saved":false,"gnss_valid":false,"registered":0}\r\nOK\r\n');
+  assert.match(a.element('selfTestSummary').textContent,/检测到存储异常.*TEST-01/);
+  assert.match(a.element('selfTestItems').children[0].textContent,/外置 NOR.*异常/);
+  a.client.emit('state',{connected:false});
+  assert.equal(a.element('selfTestSummary').textContent,'尚未自检');
+  assert.equal(a.element('bootDiagnostic').hidden,true);
+});
 
 test('same-baud APPLIED clears pending state so a later speed change is possible',async()=>{
   const a=await app();await a.click('changeBaudButton');
